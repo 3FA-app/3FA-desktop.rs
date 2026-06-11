@@ -1,0 +1,20 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Local secrets / vaults — never commit
+*.vault
+*.env
+.env
+.env.*
+!.env.example
+
+# Bundled ML models (downloaded at build time, not committed)
+/models/*.bin
+/models/*.onnx
+
+# Release artifacts
+/dist
+
+# macOS
+.DS_Store

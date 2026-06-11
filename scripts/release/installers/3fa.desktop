@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=3FA
+Comment=Secure desktop authenticator
+Exec=@BIN@
+Terminal=false
+Categories=Utility;Security;
+StartupNotify=true

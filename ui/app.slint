@@ -1,0 +1,264 @@
+// 3FA desktop authenticator — Slint UI.
+//
+// Pure declarative markup; all behavior is in Rust (`src/ui.rs`) via the
+// callbacks below. Two screens — the lock screen (passcode pad + factor
+// buttons) and the vault (live codes with countdown rings) — plus a thin
+// settings strip. State is pushed in through `in` properties.
+
+import { Button, LineEdit, ListView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+// One account row as projected for display. Secrets never reach the UI layer —
+// only the already-computed `code`.
+export struct AccountView {
+    id: string,
+    issuer: string,
+    label: string,
+    code: string,
+    seconds: int,    // seconds left in the current TOTP window
+    progress: float, // 0.0..1.0 for the countdown ring
+}
+
+// A single key on the passcode pad.
+component KeypadButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    width: 64px;
+    height: 64px;
+    border-radius: 32px;
+    background: ta.pressed ? #3a3a48 : ta.has-hover ? #2c2c38 : #23232c;
+    animate background { duration: 80ms; }
+    Text {
+        text: root.text;
+        color: white;
+        font-size: 24px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component CountdownRing inherits Rectangle {
+    in property <float> progress; // 1.0 = full window remaining
+    in property <int> seconds;
+    width: 36px;
+    height: 36px;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 36;
+        viewbox-height: 36;
+        stroke: root.seconds <= 5 ? #ff5d5d : #5d9cff;
+        stroke-width: 3px;
+        // Simple shrinking arc approximation via opacity on a filled ring.
+        MoveTo { x: 18; y: 2; }
+        LineTo { x: 18; y: 2; }
+    }
+    Text {
+        text: root.seconds;
+        color: root.seconds <= 5 ? #ff5d5d : #aeb4c2;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "3FA Authenticator";
+    icon: @image-url("");
+    preferred-width: 420px;
+    preferred-height: 620px;
+    background: #16161c;
+
+    // ---- state pushed from Rust ----
+    in property <string> screen: "lock";          // "lock" | "vault" | "setup"
+    in property <[AccountView]> accounts;
+    in property <string> status;                   // error / info line
+    in property <int> entered-length;              // dots filled on the pad
+    in property <int> session-seconds;             // remaining unlocked time
+    in property <bool> biometric-available;
+    in property <bool> passkey-available;
+    in property <bool> voice-available;
+
+    // ---- callbacks handled in Rust ----
+    callback key-pressed(string);                  // a digit "0".."9"
+    callback key-backspace();
+    callback use-biometric();
+    callback use-passkey();
+    callback use-voice();
+    callback add-account(string);                  // an otpauth:// uri
+    callback copy-code(string);                    // account id
+    callback lock-now();
+    callback extend-session();
+
+    VerticalBox {
+        padding: 20px;
+
+        // ============================ LOCK ============================
+        if root.screen == "lock" || root.screen == "setup": VerticalBox {
+            alignment: center;
+            spacing: 18px;
+
+            Text {
+                text: root.screen == "setup" ? "Set a 6-digit passcode" : "Unlock 3FA";
+                color: white;
+                font-size: 22px;
+                horizontal-alignment: center;
+            }
+
+            // passcode dots
+            HorizontalBox {
+                alignment: center;
+                spacing: 12px;
+                for i in 6: Rectangle {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    border-width: 2px;
+                    border-color: #5d9cff;
+                    background: i < root.entered-length ? #5d9cff : transparent;
+                }
+            }
+
+            // numeric keypad
+            for row in [["1","2","3"],["4","5","6"],["7","8","9"]]: HorizontalBox {
+                alignment: center;
+                spacing: 14px;
+                for d in row: KeypadButton {
+                    text: d;
+                    clicked => { root.key-pressed(d); }
+                }
+            }
+            HorizontalBox {
+                alignment: center;
+                spacing: 14px;
+                Rectangle { width: 64px; }
+                KeypadButton {
+                    text: "0";
+                    clicked => { root.key-pressed("0"); }
+                }
+                KeypadButton {
+                    text: "⌫";
+                    clicked => { root.key-backspace(); }
+                }
+            }
+
+            // alternative factors
+            HorizontalBox {
+                alignment: center;
+                spacing: 10px;
+                if root.biometric-available: Button {
+                    text: "Touch ID";
+                    clicked => { root.use-biometric(); }
+                }
+                if root.passkey-available: Button {
+                    text: "Passkey";
+                    clicked => { root.use-passkey(); }
+                }
+                if root.voice-available: Button {
+                    text: "Voice";
+                    clicked => { root.use-voice(); }
+                }
+            }
+
+            Text {
+                text: root.status;
+                color: #ff8a8a;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+
+        // ============================ VAULT ============================
+        if root.screen == "vault": VerticalBox {
+            spacing: 12px;
+
+            HorizontalBox {
+                Text {
+                    text: "Accounts";
+                    color: white;
+                    font-size: 20px;
+                    vertical-alignment: center;
+                }
+                Rectangle {} // spacer
+                Text {
+                    text: "locks in " + root.session-seconds + "s";
+                    color: #aeb4c2;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+
+            ListView {
+                for acct in root.accounts: Rectangle {
+                    height: 64px;
+                    background: #1e1e26;
+                    border-radius: 10px;
+                    HorizontalBox {
+                        padding: 12px;
+                        spacing: 12px;
+                        VerticalBox {
+                            alignment: center;
+                            Text {
+                                text: acct.issuer;
+                                color: white;
+                                font-size: 15px;
+                            }
+                            Text {
+                                text: acct.label;
+                                color: #8a90a0;
+                                font-size: 12px;
+                            }
+                        }
+                        Rectangle {} // spacer
+                        Text {
+                            text: acct.code;
+                            color: #5d9cff;
+                            font-size: 24px;
+                            font-family: "Menlo";
+                            vertical-alignment: center;
+                        }
+                        CountdownRing {
+                            progress: acct.progress;
+                            seconds: acct.seconds;
+                        }
+                        Button {
+                            text: "Copy";
+                            clicked => { root.copy-code(acct.id); }
+                        }
+                    }
+                }
+            }
+
+            HorizontalBox {
+                spacing: 10px;
+                add-uri := LineEdit {
+                    placeholder-text: "otpauth://totp/… (paste to add)";
+                }
+                Button {
+                    text: "Add";
+                    clicked => { root.add-account(add-uri.text); add-uri.text = ""; }
+                }
+            }
+
+            HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: "Keep open (+factor)";
+                    clicked => { root.extend-session(); }
+                }
+                Button {
+                    text: "Lock now";
+                    clicked => { root.lock-now(); }
+                }
+            }
+
+            Text {
+                text: root.status;
+                color: #8a90a0;
+                font-size: 12px;
+            }
+        }
+    }
+}

@@ -1,0 +1,62 @@
+[package]
+name = "threefa-frontend"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+authors = ["ORES"]
+default-run = "threefa"
+
+# Core authenticator logic lives in a library so it can be unit-tested without
+# spinning up the GUI. The Slint app is a thin binary on top.
+[lib]
+name = "threefa_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "threefa"
+path = "src/main.rs"
+
+[features]
+# The GUI is default; `--no-default-features` builds/tests just the core library
+# (useful in CI and headless environments).
+default = ["gui"]
+gui = ["dep:slint", "dep:arboard"]
+
+[dependencies]
+# Crypto / OTP core — RustCrypto stack, minimal third-party trust.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+rand = "0.8"
+rand_core = "0.6"
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+base32 = "0.5"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# otpauth:// URI parsing
+url = "2"
+
+# GUI (optional so the core lib builds headless)
+slint = { version = "1.8", optional = true }
+arboard = { version = "3", optional = true }
+
+[build-dependencies]
+slint-build = "1.8"
+
+[dev-dependencies]
+hex = "0.4"
+
+# Optimize for a small, fast binary (security app — not a memory hog).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
