@@ -3,6 +3,26 @@
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Fail closed unless every payload file matches the shipped SHA-256 manifest.
+function Verify-Payload {
+  $manifest = Join-Path $here 'SHA256SUMS'
+  if (-not (Test-Path $manifest)) {
+    Write-Error 'missing SHA256SUMS; refusing to install unverified files'; exit 1
+  }
+  foreach ($line in Get-Content $manifest) {
+    if ($line -match '^([0-9a-fA-F]{64})\s+\*?\.?[\\/]?(.+)$') {
+      $expected = $matches[1].ToUpperInvariant()
+      $rel = $matches[2].Trim()
+      $path = Join-Path $here $rel
+      if (-not (Test-Path $path)) { Write-Error "missing file from manifest: $rel"; exit 1 }
+      $actual = (Get-FileHash -Algorithm SHA256 $path).Hash
+      if ($actual -ne $expected) { Write-Error "checksum FAILED for $rel — refusing to install"; exit 1 }
+    }
+  }
+  Write-Host 'Integrity verified.'
+}
+Verify-Payload
+
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\3FA'
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 

@@ -61,13 +61,32 @@ case "$PLATFORM" in
     echo "unknown platform: $PLATFORM" >&2; exit 1 ;;
 esac
 
+# Integrity manifest *inside* the package, covering the installable payload
+# (everything except the installer script that verifies it and the manifest /
+# signature themselves). The installer checks this before copying anything into
+# place, so a corrupted or partially-tampered download fails closed.
+command -v shasum >/dev/null 2>&1 || { echo "shasum required to build a verifiable package" >&2; exit 1; }
+( cd "$PKG" && find . -type f \
+    ! -name 'SHA256SUMS' ! -name 'SHA256SUMS.*' \
+    ! -name 'install.sh' ! -name 'install.ps1' \
+    -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 > SHA256SUMS )
+
+# Authenticity (the real tamper-evidence root): if a minisign secret key is
+# configured in the release environment, sign the manifest. The installers pin
+# the matching public key and verify this signature when present, so a swapped
+# binary *and* a swapped checksum can't both pass. Set MINISIGN_SECRET_KEY in CI.
+if [[ -n "${MINISIGN_SECRET_KEY:-}" ]] && command -v minisign >/dev/null 2>&1; then
+  minisign -S -s "$MINISIGN_SECRET_KEY" -m "$PKG/SHA256SUMS" -t "3FA $NAME"
+  echo "signed: SHA256SUMS.minisig"
+else
+  echo "WARNING: MINISIGN_SECRET_KEY not set — package ships unsigned (checksums only)." >&2
+fi
+
 OUT="$DIST/$NAME.zip"
 rm -f "$OUT"
 ( cd "$STAGE" && zip -r -q "$OUT" "$NAME" )
 
-# Emit a sidecar checksum for convenience.
-if command -v shasum >/dev/null 2>&1; then
-  ( cd "$DIST" && shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256" )
-fi
+# Emit a sidecar checksum of the whole zip for the download page.
+( cd "$DIST" && shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256" )
 
 echo "packaged: $OUT"

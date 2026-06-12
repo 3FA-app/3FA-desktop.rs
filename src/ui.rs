@@ -6,9 +6,14 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ModelRc, Timer, TimerMode, VecModel};
+use zeroize::{Zeroize, Zeroizing};
+
+/// How long a copied OTP code is allowed to sit on the clipboard before we wipe
+/// it (if it hasn't already been replaced by something the user copied).
+const CLIPBOARD_CLEAR_AFTER: Duration = Duration::from_secs(20);
 
 use threefa_core::auth::{FactorProof, PolicyEngine};
 use threefa_core::crypto::SecretKey;
@@ -37,7 +42,8 @@ impl AppState {
         // Drop decrypted material; SecretKey/VaultData zeroize on drop.
         self.data = None;
         self.dek = None;
-        self.entry.clear();
+        // Wipe the passcode buffer's bytes, not just reset its length.
+        self.entry.zeroize();
         self.session.lock();
     }
 
@@ -63,6 +69,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let vault_path = {
         let dir = data_dir();
         let _ = std::fs::create_dir_all(&dir);
+        // Restrict the data directory to the owner so other local accounts can't
+        // read the (encrypted, but salt-bearing) vault for an offline guess.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
         dir.join(VAULT_FILENAME)
     };
 
@@ -78,7 +91,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         data: None,
         dek: None,
         session: Session::new(),
-        entry: String::new(),
+        // Pre-size to the passcode length so pushing digits never reallocates
+        // (a realloc would copy the secret into a freed heap block we can't wipe).
+        entry: String::with_capacity(8),
         setup,
     }));
 
@@ -256,7 +271,9 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 /// Try to unlock (or, in setup mode, create) the vault with the 6-digit entry.
 fn handle_passcode_submit(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     let mut s = state.borrow_mut();
-    let entry = std::mem::take(&mut s.entry);
+    // Move the passcode out and guarantee it is wiped when this function returns,
+    // on every path (success, wrong passcode, or vault-create error).
+    let entry = Zeroizing::new(std::mem::take(&mut s.entry));
     app.set_entered_length(0);
 
     if s.setup {
@@ -368,9 +385,16 @@ fn collect_available_factor_proofs() -> Vec<FactorProof> {
     Vec::new()
 }
 
+/// Atomically write the sealed vault with owner-only permissions.
+///
+/// The payload is already AEAD-encrypted, but the file still carries the KDF salt
+/// and parameters, so we (a) restrict it to mode 0600 to deny other local users a
+/// copy for offline passcode guessing, and (b) write-temp-then-`rename` so a crash
+/// mid-write can never truncate the live vault into an unparseable state — which
+/// the loader would treat as "no vault", silently dropping every enrolled account.
 fn persist(path: &std::path::Path, file: &VaultFile) {
     // Crash-safe, owner-only write so a power loss mid-save can't truncate the
-    // user's only copy of their seeds (see `write_private_atomic`).
+    // user's only copy of their seeds (see `threefa_core::write_private_atomic`).
     if let Ok(bytes) = serde_json::to_vec(file) {
         if let Err(e) = threefa_core::write_private_atomic(path, &bytes) {
             eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
@@ -380,6 +404,25 @@ fn persist(path: &std::path::Path, file: &VaultFile) {
 
 fn set_clipboard(text: &str) {
     if let Ok(mut cb) = arboard::Clipboard::new() {
-        let _ = cb.set_text(text.to_string());
+        if cb.set_text(text.to_string()).is_ok() {
+            schedule_clipboard_clear(text.to_string());
+        }
     }
+}
+
+/// Wipe the clipboard a short while after copying an OTP code, so a one-time code
+/// doesn't linger (and sync to other devices via Universal/Cloud Clipboard). Only
+/// clears if our code is still there, to avoid clobbering whatever the user copied
+/// in the meantime.
+fn schedule_clipboard_clear(value: String) {
+    let timer = Timer::default();
+    timer.start(TimerMode::SingleShot, CLIPBOARD_CLEAR_AFTER, move || {
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            if cb.get_text().map(|c| c == value).unwrap_or(false) {
+                let _ = cb.set_text(String::new());
+            }
+        }
+    });
+    // Keep the one-shot timer alive until it fires.
+    std::mem::forget(timer);
 }
