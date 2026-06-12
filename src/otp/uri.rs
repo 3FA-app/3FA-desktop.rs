@@ -45,6 +45,8 @@ pub enum UriError {
     BadSecret,
     #[error("missing required HOTP counter")]
     MissingCounter,
+    #[error("unsupported algorithm: {0}")]
+    UnsupportedAlgorithm(String),
     #[error("malformed URI: {0}")]
     Malformed(String),
 }
@@ -78,17 +80,37 @@ impl OtpAccount {
             match k.as_ref() {
                 "secret" => secret_b32 = Some(v.into_owned()),
                 "issuer" => issuer_param = Some(v.into_owned()),
+                // Reject unrecognized parameter values rather than silently
+                // defaulting: a malicious QR/URI must not be able to downgrade the
+                // hash to SHA-1 or coerce a digit count that makes this client
+                // generate codes the real service won't accept (a silent lockout).
                 "algorithm" => {
                     algorithm = match v.to_ascii_uppercase().as_str() {
                         "SHA1" => Algorithm::Sha1,
                         "SHA256" => Algorithm::Sha256,
                         "SHA512" => Algorithm::Sha512,
-                        _ => Algorithm::Sha1,
+                        other => return Err(UriError::UnsupportedAlgorithm(other.to_string())),
                     }
                 }
-                "digits" => digits = v.parse().unwrap_or(6).clamp(6, 8),
-                "period" => period = v.parse().unwrap_or(30).max(1),
-                "counter" => counter = v.parse().unwrap_or(0),
+                "digits" => {
+                    digits = v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|d| (6..=8).contains(d))
+                        .ok_or_else(|| UriError::Malformed(format!("invalid digits: {v}")))?;
+                }
+                "period" => {
+                    period = v
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|p| *p > 0)
+                        .ok_or_else(|| UriError::Malformed(format!("invalid period: {v}")))?;
+                }
+                "counter" => {
+                    counter = v
+                        .parse::<u64>()
+                        .map_err(|_| UriError::Malformed(format!("invalid counter: {v}")))?;
+                }
                 _ => {}
             }
         }
@@ -209,5 +231,26 @@ mod tests {
         let uri = "otpauth://totp/GitHub:octocat?secret=JBSWY3DPEHPK3PXP";
         let acct = OtpAccount::from_uri(uri).unwrap();
         assert_eq!(acct.issuer, "GitHub");
+    }
+
+    #[test]
+    fn rejects_unknown_algorithm_instead_of_downgrading() {
+        let uri = "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP&algorithm=SHA999";
+        assert!(matches!(
+            OtpAccount::from_uri(uri),
+            Err(UriError::UnsupportedAlgorithm(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_out_of_range_digits_and_bad_period() {
+        assert!(matches!(
+            OtpAccount::from_uri("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP&digits=4"),
+            Err(UriError::Malformed(_))
+        ));
+        assert!(matches!(
+            OtpAccount::from_uri("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP&period=0"),
+            Err(UriError::Malformed(_))
+        ));
     }
 }

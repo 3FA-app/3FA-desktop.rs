@@ -63,6 +63,13 @@ pub fn open_downloaded(
     blob: &SealedBlob,
     account_password: &[u8],
 ) -> Result<VaultData, SyncError> {
+    // The blob came from the (untrusted) network: a malicious or compromised
+    // server can return arbitrary `kdf_params`. Validate the envelope shape and
+    // clamp the KDF cost *before* calling `derive_key`, so the server can't make
+    // this device allocate gigabytes / spin forever in Argon2 (a client-side DoS).
+    if !blob.is_well_formed() {
+        return Err(SyncError::Crypto(CryptoError::Decrypt));
+    }
     let key = crypto::derive_key(account_password, &blob.kdf_salt, blob.kdf_params)?;
     let nonce: [u8; crypto::NONCE_LEN] = blob
         .nonce

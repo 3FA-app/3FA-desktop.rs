@@ -7,7 +7,11 @@ To install:
   Linux    : run ./install.sh   (installs to ~/.local/bin)
   Windows  : right-click install.ps1 -> Run with PowerShell
 
-Before installing, verify the download's integrity against the SHA-256 shown on
+The installer verifies the unzipped payload against the bundled SHA256SUMS
+manifest (and, for signed releases, its minisign signature) before copying
+anything into place, and refuses to install if verification fails.
+
+You can also independently check the downloaded zip against the SHA-256 shown on
 the download page:
 
   macOS / Linux : shasum -a 256 <file>.zip
