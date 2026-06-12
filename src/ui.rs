@@ -369,8 +369,12 @@ fn collect_available_factor_proofs() -> Vec<FactorProof> {
 }
 
 fn persist(path: &std::path::Path, file: &VaultFile) {
+    // Crash-safe, owner-only write so a power loss mid-save can't truncate the
+    // user's only copy of their seeds (see `write_private_atomic`).
     if let Ok(bytes) = serde_json::to_vec(file) {
-        let _ = std::fs::write(path, bytes);
+        if let Err(e) = threefa_core::write_private_atomic(path, &bytes) {
+            eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
+        }
     }
 }
 

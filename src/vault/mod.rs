@@ -20,7 +20,7 @@ use crate::otp::uri::{OtpAccount, OtpKind};
 use crate::otp::Algorithm;
 use serde::{Deserialize, Serialize};
 use crate::protocol::KdfParams;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Factor policy: how many distinct factor kinds each gate requires.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,17 +44,30 @@ impl Default for FactorPolicy {
 
 /// Serializable form of an enrolled account (the runtime [`OtpAccount`] carries
 /// zeroizing semantics; this is its on-disk projection, encrypted at rest).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// Like [`OtpAccount`], the decrypted form wipes its `secret` on drop so raw OTP
+/// seeds don't linger in freed heap after the vault re-locks. Non-secret fields
+/// are `#[zeroize(skip)]` (the enums also don't implement `Zeroize`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct StoredAccount {
+    #[zeroize(skip)]
     pub id: String,
+    #[zeroize(skip)]
     pub issuer: String,
+    #[zeroize(skip)]
     pub label: String,
-    /// Raw key bytes. Only ever exists inside the DEK-encrypted payload.
+    /// Raw key bytes. Only ever exists inside the DEK-encrypted payload, and is
+    /// zeroized on drop.
     pub secret: Vec<u8>,
+    #[zeroize(skip)]
     pub kind: StoredKind,
+    #[zeroize(skip)]
     pub algorithm: StoredAlg,
+    #[zeroize(skip)]
     pub digits: u32,
+    #[zeroize(skip)]
     pub period: u64,
+    #[zeroize(skip)]
     pub counter: u64,
 }
 
@@ -122,10 +135,13 @@ impl StoredAccount {
     }
 }
 
-/// The decrypted vault contents held in memory while unlocked.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// The decrypted vault contents held in memory while unlocked. Wipes its
+/// secret-bearing fields on drop (each account's seed, the voiceprint, and the
+/// voice-PIN hash) so they don't outlive a re-lock in freed memory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct VaultData {
     pub accounts: Vec<StoredAccount>,
+    #[zeroize(skip)]
     pub policy: FactorPolicy,
     /// Speaker-verification embedding for the voice factor, if enrolled. Stored
     /// only inside the encrypted payload and never uploaded to the server.
@@ -180,6 +196,8 @@ pub enum VaultError {
     Crypto(#[from] CryptoError),
     #[error("vault file is corrupt or truncated")]
     Corrupt,
+    #[error("unsupported vault format version {0} (supported: {expected})", expected = VaultFile::CURRENT_FORMAT)]
+    UnsupportedVersion(u32),
     #[error("serialization error: {0}")]
     Serde(String),
 }
@@ -215,6 +233,11 @@ impl VaultFile {
 
     /// Unlock with a passcode: re-derive KEK, unwrap DEK, decrypt payload.
     pub fn unlock(&self, passcode: &[u8]) -> Result<(VaultData, crypto::SecretKey), VaultError> {
+        // Refuse a file written by a newer/unknown format rather than risk
+        // misinterpreting its fields (fail closed on forward-incompatibility).
+        if self.format_version != Self::CURRENT_FORMAT {
+            return Err(VaultError::UnsupportedVersion(self.format_version));
+        }
         let salt: [u8; SALT_LEN] = self
             .kdf_salt
             .as_slice()
@@ -255,9 +278,13 @@ mod tests {
             "otpauth://totp/GitHub:octocat?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
         )
         .unwrap();
+        // Construct fields explicitly: `..Default::default()` can't partial-move
+        // out of a `Drop` type (VaultData now zeroizes on drop).
         VaultData {
             accounts: vec![StoredAccount::from(&acct)],
-            ..Default::default()
+            policy: FactorPolicy::default(),
+            voiceprint: None,
+            voice_pin_hash: None,
         }
     }
 
@@ -297,6 +324,14 @@ mod tests {
         file.reseal(&dek, &data).unwrap();
         let (loaded, _) = file.unlock(b"123456").unwrap();
         assert_eq!(loaded.accounts.len(), 2);
+    }
+
+    #[test]
+    fn rejects_unknown_format_version() {
+        let (mut file, _dek) = VaultFile::create(b"123456", &sample_data()).unwrap();
+        file.format_version = VaultFile::CURRENT_FORMAT + 1;
+        let err = file.unlock(b"123456").unwrap_err();
+        assert!(matches!(err, VaultError::UnsupportedVersion(v) if v == VaultFile::CURRENT_FORMAT + 1));
     }
 
     #[test]
