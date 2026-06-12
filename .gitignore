@@ -18,3 +18,6 @@
 
 # macOS
 .DS_Store
+
+# Node (release tooling)
+node_modules
