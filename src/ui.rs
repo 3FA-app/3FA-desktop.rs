@@ -16,9 +16,11 @@ use zeroize::{Zeroize, Zeroizing};
 const CLIPBOARD_CLEAR_AFTER: Duration = Duration::from_secs(20);
 
 use threefa_core::auth::{FactorProof, PolicyEngine};
+use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
 use threefa_core::session::{PollResult, Session};
+use threefa_core::sync::http;
 use threefa_core::vault::{StoredAccount, VaultData, VaultFile};
 use threefa_core::{data_dir, VAULT_FILENAME};
 
@@ -35,6 +37,10 @@ struct AppState {
     entry: String,
     /// True when no vault exists yet and we are choosing a new passcode.
     setup: bool,
+    /// Non-secret sync config (server URL, username, stable device id).
+    sync_cfg: SyncConfig,
+    /// Path to `config.json` beside the vault.
+    config_path: std::path::PathBuf,
 }
 
 impl AppState {
@@ -85,6 +91,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|bytes| serde_json::from_slice::<VaultFile>(&bytes).ok());
     let setup = file.is_none();
 
+    let cfg_path = config_path();
+    let mut sync_cfg = SyncConfig::load(&cfg_path);
+    // Generate + persist a stable device id on first run (this device's key in the
+    // sync version vector).
+    let id_before = sync_cfg.device_id.clone();
+    sync_cfg.ensure_device_id();
+    if sync_cfg.device_id != id_before {
+        let _ = sync_cfg.save(&cfg_path);
+    }
+
     let state = Rc::new(RefCell::new(AppState {
         vault_path,
         file,
@@ -95,15 +111,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // (a realloc would copy the secret into a freed heap block we can't wipe).
         entry: String::with_capacity(8),
         setup,
+        sync_cfg,
+        config_path: cfg_path,
     }));
 
     let app = AppWindow::new()?;
     app.set_screen(if setup { "setup".into() } else { "lock".into() });
+    {
+        let s = state.borrow();
+        app.set_sync_server(s.sync_cfg.server_url.clone().into());
+        app.set_sync_username(s.sync_cfg.username.clone().into());
+    }
     // Native factors are stubbed for now (see auth::biometric); hide their
     // buttons until a real backend reports availability.
     app.set_biometric_available(false);
     app.set_passkey_available(false);
     app.set_voice_available(false);
+    // The "Scan camera" button only appears in builds that include the camera
+    // stack; image-import scanning is always available.
+    app.set_camera_available(cfg!(feature = "camera"));
 
     wire_callbacks(&app, &state);
     spawn_tick(&app, &state);
@@ -148,39 +174,54 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         });
     }
 
-    // --- add account from otpauth:// uri ---
+    // --- add account from otpauth:// uri (typed/pasted) ---
     {
         let state = state.clone();
         let weak = weak.clone();
         app.on_add_account(move |uri| {
             let Some(app) = weak.upgrade() else { return };
-            match OtpAccount::from_uri(uri.as_str()) {
-                Ok(acct) => {
-                    {
-                        let mut s = state.borrow_mut();
-                        // Copy out the DEK and path so we don't hold overlapping
-                        // borrows of `s` while resealing/persisting.
-                        let dek = match s.dek.as_ref() {
-                            Some(d) => **d,
-                            None => return,
-                        };
-                        let path = s.vault_path.clone();
-                        if let Some(data) = s.data.as_mut() {
-                            data.accounts.push(StoredAccount::from(&acct));
-                        }
-                        let snapshot = match s.data.as_ref() {
-                            Some(d) => d.clone(),
-                            None => return,
-                        };
-                        if let Some(file) = s.file.as_mut() {
-                            let _ = file.reseal(&dek, &snapshot);
-                            persist(&path, file);
-                        }
-                    }
-                    app.set_status("Account added".into());
-                    refresh_vault(&app, &state);
+            apply_otpauth_uri(&app, &state, uri.as_str());
+        });
+    }
+
+    // --- add account by scanning a QR from an image / screenshot ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_scan_image(move || {
+            let Some(app) = weak.upgrade() else { return };
+            let picked = rfd::FileDialog::new()
+                .add_filter("QR image", &["png", "jpg", "jpeg", "webp", "bmp"])
+                .set_title("Choose a QR code image")
+                .pick_file();
+            let Some(path) = picked else { return };
+            match threefa_core::qr::decode_image_path(&path) {
+                Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
+                Err(e) => app.set_status(format!("No otpauth QR found: {e}").into()),
+            }
+        });
+    }
+
+    // --- add account by scanning a QR from the webcam (feature `camera`) ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_scan_camera(move || {
+            let Some(app) = weak.upgrade() else { return };
+            #[cfg(feature = "camera")]
+            {
+                // NOTE: blocking grab for up to 12s; a future pass can move this to
+                // a worker thread so the UI stays responsive while scanning.
+                app.set_status("Scanning — hold the QR up to the camera…".into());
+                match threefa_core::qr::scan_camera(std::time::Duration::from_secs(12)) {
+                    Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
+                    Err(e) => app.set_status(format!("Camera scan failed: {e}").into()),
                 }
-                Err(e) => app.set_status(format!("Bad otpauth URI: {e}").into()),
+            }
+            #[cfg(not(feature = "camera"))]
+            {
+                let _ = &state;
+                app.set_status("Rebuild with `--features camera` to scan from the webcam".into());
             }
         });
     }
@@ -265,6 +306,166 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 app.set_status("Voice backend not yet enabled".into());
             }
         });
+    }
+
+    // --- open / close the sync+settings screen ---
+    {
+        let weak = weak.clone();
+        app.on_open_settings(move || {
+            if let Some(app) = weak.upgrade() {
+                app.set_screen("settings".into());
+                app.set_sync_status("".into());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_close_settings(move || {
+            if let Some(app) = weak.upgrade() {
+                let unlocked = state.borrow().data.is_some();
+                app.set_screen(if unlocked { "vault".into() } else { "lock".into() });
+            }
+        });
+    }
+
+    // --- register a new account, then sync ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_sync_register(move |server, username, password| {
+            let Some(app) = weak.upgrade() else { return };
+            sync_authenticate(
+                &app, &state, AuthKind::Register,
+                server.as_str(), username.as_str(), password.as_str(),
+            );
+        });
+    }
+    // --- log in to an existing account, then sync ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_sync_login(move |server, username, password| {
+            let Some(app) = weak.upgrade() else { return };
+            sync_authenticate(
+                &app, &state, AuthKind::Login,
+                server.as_str(), username.as_str(), password.as_str(),
+            );
+        });
+    }
+    // --- sync now against the already-authenticated account ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_sync_now(move |server, username, password| {
+            let Some(app) = weak.upgrade() else { return };
+            sync_run(&app, &state, server.as_str(), username.as_str(), password.as_str());
+        });
+    }
+}
+
+enum AuthKind {
+    Register,
+    Login,
+}
+
+/// Persist server/username into config and reflect them in the window.
+fn save_sync_identity(app: &AppWindow, state: &Rc<RefCell<AppState>>, server: &str, username: &str) {
+    let mut s = state.borrow_mut();
+    s.sync_cfg.server_url = server.to_string();
+    s.sync_cfg.username = username.to_string();
+    s.sync_cfg.ensure_device_id();
+    let path = s.config_path.clone();
+    let _ = s.sync_cfg.save(&path);
+    app.set_sync_server(server.into());
+    app.set_sync_username(username.into());
+}
+
+/// Register or log in, store the device token in the OS keychain, then run a sync.
+fn sync_authenticate(
+    app: &AppWindow,
+    state: &Rc<RefCell<AppState>>,
+    kind: AuthKind,
+    server: &str,
+    username: &str,
+    password: &str,
+) {
+    if server.is_empty() || username.is_empty() || password.is_empty() {
+        app.set_sync_status("Enter server, username and password".into());
+        return;
+    }
+    let device_name = "3FA Desktop";
+    let result = match kind {
+        AuthKind::Register => http::register(server, username, password, device_name),
+        AuthKind::Login => http::login(server, username, password, device_name),
+    };
+    match result {
+        Ok(tok) => {
+            if let Err(e) = http::keystore::save_token(server, &tok.sync_token) {
+                app.set_sync_status(format!("Could not store token: {e}").into());
+                return;
+            }
+            save_sync_identity(app, state, server, username);
+            app.set_sync_status("Authenticated — syncing…".into());
+            sync_run(app, state, server, username, password);
+        }
+        Err(e) => app.set_sync_status(format!("Auth failed: {e}").into()),
+    }
+}
+
+/// Pull→merge→push the unlocked vault against the server, then persist the merge.
+fn sync_run(
+    app: &AppWindow,
+    state: &Rc<RefCell<AppState>>,
+    server: &str,
+    username: &str,
+    password: &str,
+) {
+    if password.is_empty() {
+        app.set_sync_status("Enter your account password to sync".into());
+        return;
+    }
+    let Some(token) = http::keystore::load_token(server) else {
+        app.set_sync_status("Log in or register first".into());
+        return;
+    };
+    // Snapshot the unlocked vault + device id without holding the borrow across I/O.
+    let (local, device_id) = {
+        let s = state.borrow();
+        let Some(data) = s.data.as_ref() else {
+            app.set_sync_status("Unlock the vault before syncing".into());
+            return;
+        };
+        (data.clone(), s.sync_cfg.device_id.clone())
+    };
+
+    let mut transport = match http::HttpTransport::new(server, token) {
+        Ok(t) => t,
+        Err(e) => {
+            app.set_sync_status(format!("Transport error: {e}").into());
+            return;
+        }
+    };
+    match threefa_core::sync::synchronize(&mut transport, password.as_bytes(), &device_id, &local) {
+        Ok((merged, _version)) => {
+            save_sync_identity(app, state, server, username);
+            {
+                let mut s = state.borrow_mut();
+                let dek = match s.dek.as_ref() {
+                    Some(d) => **d,
+                    None => return,
+                };
+                let path = s.vault_path.clone();
+                if let Some(file) = s.file.as_mut() {
+                    let _ = file.reseal(&dek, &merged);
+                    persist(&path, file);
+                }
+                s.data = Some(merged.clone());
+            }
+            app.set_sync_status(format!("Synced — {} accounts", merged.accounts.len()).into());
+            refresh_vault(app, state);
+        }
+        Err(e) => app.set_sync_status(format!("Sync failed: {e}").into()),
     }
 }
 
@@ -383,6 +584,44 @@ fn spawn_tick(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 /// factor; this is the seam where a biometric/passkey/voice proof gets added.
 fn collect_available_factor_proofs() -> Vec<FactorProof> {
     Vec::new()
+}
+
+/// Enroll an account from a decoded/typed `otpauth://` URI: parse it, append it
+/// to the unlocked vault, re-seal under the live DEK, and persist. Shared by the
+/// manual "Add" field and both QR scan paths so they all run the same validation
+/// and zeroization route (`OtpAccount` wipes its seed on drop).
+fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) {
+    match OtpAccount::from_uri(uri) {
+        Ok(acct) => {
+            {
+                let mut s = state.borrow_mut();
+                // Copy out the DEK and path so we don't hold overlapping borrows
+                // of `s` while resealing/persisting.
+                let dek = match s.dek.as_ref() {
+                    Some(d) => **d,
+                    None => {
+                        app.set_status("Unlock the vault before adding accounts".into());
+                        return;
+                    }
+                };
+                let path = s.vault_path.clone();
+                if let Some(data) = s.data.as_mut() {
+                    data.accounts.push(StoredAccount::from(&acct));
+                }
+                let snapshot = match s.data.as_ref() {
+                    Some(d) => d.clone(),
+                    None => return,
+                };
+                if let Some(file) = s.file.as_mut() {
+                    let _ = file.reseal(&dek, &snapshot);
+                    persist(&path, file);
+                }
+            }
+            app.set_status("Account added".into());
+            refresh_vault(app, state);
+        }
+        Err(e) => app.set_status(format!("Bad otpauth URI: {e}").into()),
+    }
 }
 
 /// Atomically write the sealed vault with owner-only permissions.
