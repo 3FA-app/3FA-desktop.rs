@@ -598,10 +598,11 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
         Ok(acct) => {
             {
                 let mut s = state.borrow_mut();
-                // Copy out the DEK and path so we don't hold overlapping borrows
-                // of `s` while resealing/persisting.
+                // Clone the DEK into a Zeroizing buffer (wiped on drop) rather than
+                // `**d`, which would copy the raw key onto the stack un-wiped. The
+                // clone also releases the borrow so `s.data`/`s.file` can be taken.
                 let dek = match s.dek.as_ref() {
-                    Some(d) => **d,
+                    Some(d) => d.clone(),
                     None => {
                         app.set_status("Unlock the vault before adding accounts".into());
                         return;
