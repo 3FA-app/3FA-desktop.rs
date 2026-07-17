@@ -122,4 +122,27 @@ mod tests {
         assert_eq!(back.device_id, c.device_id);
         let _ = std::fs::remove_file(&p);
     }
+
+    #[test]
+    fn supabase_accessors_prefer_config_then_fall_back() {
+        // Explicit config values are returned.
+        let c = SyncConfig {
+            supabase_url: "https://proj.supabase.co".into(),
+            supabase_anon_key: "anon-key".into(),
+            ..Default::default()
+        };
+        assert_eq!(c.supabase_url(), Some("https://proj.supabase.co"));
+        assert_eq!(c.supabase_anon_key(), Some("anon-key"));
+
+        // Empty config falls back to the build-time default (None unless the env
+        // vars were set at compile time — CI sets them for release builds).
+        let empty = SyncConfig::default();
+        assert_eq!(empty.supabase_url(), super::DEFAULT_SUPABASE_URL.filter(|s| !s.is_empty()));
+    }
+
+    #[test]
+    fn new_config_fields_default_to_empty() {
+        let c = SyncConfig::default();
+        assert!(c.supabase_url.is_empty() && c.supabase_anon_key.is_empty());
+    }
 }
