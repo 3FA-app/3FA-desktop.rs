@@ -493,6 +493,18 @@ fn pin_unlock(
     pin: &str,
     passphrase: &str,
 ) {
+    // Fall back to the configured server/username when the fields are blank
+    // (typical on a PIN unlock — identity was saved at sign-in).
+    let (cfg_server, cfg_user) = {
+        let s = state.borrow();
+        (s.sync_cfg.server_url.clone(), s.sync_cfg.username.clone())
+    };
+    let server = if server.is_empty() { cfg_server } else { server.to_string() };
+    if server.is_empty() {
+        app.set_sync_status("Enter the sync server URL".into());
+        return;
+    }
+
     let path = pin_session::session_path();
     let Some(mut file) = SealedSessionFile::load(&path) else {
         app.set_sync_status("No PIN session on this device — sign in with Supabase first".into());
