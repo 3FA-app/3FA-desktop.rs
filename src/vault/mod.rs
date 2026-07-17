@@ -18,8 +18,8 @@
 use crate::crypto::{self, CryptoError, Sealed, KEY_LEN, SALT_LEN};
 use crate::otp::uri::{OtpAccount, OtpKind};
 use crate::otp::Algorithm;
-use serde::{Deserialize, Serialize};
 use crate::protocol::KdfParams;
+use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Factor policy: how many distinct factor kinds each gate requires.
@@ -181,8 +181,11 @@ impl From<Sealed> for SealedRepr {
 impl TryFrom<&SealedRepr> for Sealed {
     type Error = VaultError;
     fn try_from(r: &SealedRepr) -> Result<Self, Self::Error> {
-        let nonce: [u8; crypto::NONCE_LEN] =
-            r.nonce.as_slice().try_into().map_err(|_| VaultError::Corrupt)?;
+        let nonce: [u8; crypto::NONCE_LEN] = r
+            .nonce
+            .as_slice()
+            .try_into()
+            .map_err(|_| VaultError::Corrupt)?;
         Ok(Sealed {
             nonce,
             ciphertext: r.ciphertext.clone(),
@@ -210,7 +213,10 @@ impl VaultFile {
     /// Generates a random DEK, wraps it under KEK = Argon2id(passcode), and seals
     /// the payload under the DEK. Returns the file plus the live DEK so the
     /// caller can keep the vault unlocked without re-deriving.
-    pub fn create(passcode: &[u8], data: &VaultData) -> Result<(Self, crypto::SecretKey), VaultError> {
+    pub fn create(
+        passcode: &[u8],
+        data: &VaultData,
+    ) -> Result<(Self, crypto::SecretKey), VaultError> {
         let kdf_params = KdfParams::default();
         let salt = crypto::random_salt();
         let kek = crypto::derive_key(passcode, &salt, kdf_params)?;
@@ -331,7 +337,39 @@ mod tests {
         let (mut file, _dek) = VaultFile::create(b"123456", &sample_data()).unwrap();
         file.format_version = VaultFile::CURRENT_FORMAT + 1;
         let err = file.unlock(b"123456").unwrap_err();
-        assert!(matches!(err, VaultError::UnsupportedVersion(v) if v == VaultFile::CURRENT_FORMAT + 1));
+        assert!(
+            matches!(err, VaultError::UnsupportedVersion(v) if v == VaultFile::CURRENT_FORMAT + 1)
+        );
+    }
+
+    /// A truncated on-disk nonce must surface as `Corrupt`, not panic or decrypt.
+    #[test]
+    fn corrupt_nonce_length_is_rejected() {
+        let (mut file, _dek) = VaultFile::create(b"123456", &sample_data()).unwrap();
+        file.wrapped_dek.nonce.truncate(4);
+        assert!(matches!(file.unlock(b"123456"), Err(VaultError::Corrupt)));
+    }
+
+    /// An HOTP account computes codes from its *stored counter* — pinned against
+    /// the RFC 4226 Appendix D vectors (counter 3 -> 969429, counter 7 -> 162583).
+    #[test]
+    fn hotp_account_uses_stored_counter() {
+        let mut acct = StoredAccount {
+            id: "x".into(),
+            issuer: "x".into(),
+            label: "x".into(),
+            secret: b"12345678901234567890".to_vec(),
+            kind: StoredKind::Hotp,
+            algorithm: StoredAlg::Sha1,
+            digits: 6,
+            period: 30,
+            counter: 3,
+        };
+        // unix_time is irrelevant for HOTP.
+        assert_eq!(acct.current_code(0).unwrap(), "969429");
+        assert_eq!(acct.current_code(999_999).unwrap(), "969429");
+        acct.counter = 7;
+        assert_eq!(acct.current_code(0).unwrap(), "162583");
     }
 
     #[test]
