@@ -571,11 +571,11 @@ fn pin_unlock(
 
     // Re-enroll to get a fresh sync token (covers server-side revocation), and
     // reseal under the same PIN with the rotated refresh token.
-    let sync_token = match http::enroll_supabase(server, &session.access_token, "3FA Desktop") {
+    let sync_token = match http::enroll_supabase(&server, &session.access_token, "3FA Desktop") {
         Ok(t) => t.sync_token,
         Err(_) => secrets.sync_token.clone(), // enrollment optional if token still valid
     };
-    let _ = http::keystore::save_token(server, &sync_token);
+    let _ = http::keystore::save_token(&server, &sync_token);
     let rotated = SessionSecrets {
         refresh_token: session.refresh_token.clone(),
         sync_token: sync_token.clone(),
@@ -586,12 +586,7 @@ fn pin_unlock(
 
     app.set_sync_status("Session refreshed with PIN".into());
     if !passphrase.is_empty() {
-        let (server_s, user_s) = {
-            let s = state.borrow();
-            (s.sync_cfg.server_url.clone(), s.sync_cfg.username.clone())
-        };
-        let server = if server.is_empty() { server_s } else { server.to_string() };
-        sync_run(app, state, &server, &user_s, passphrase);
+        sync_run(app, state, &server, &cfg_user, passphrase);
     }
 }
 
