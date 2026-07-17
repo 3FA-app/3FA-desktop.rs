@@ -103,14 +103,12 @@ fn hmac_digest(algorithm: Algorithm, key: &[u8], msg: &[u8]) -> Vec<u8> {
             mac.finalize().into_bytes().to_vec()
         }
         Algorithm::Sha256 => {
-            let mut mac =
-                <Hmac<Sha256>>::new_from_slice(key).expect("HMAC accepts any key length");
+            let mut mac = <Hmac<Sha256>>::new_from_slice(key).expect("HMAC accepts any key length");
             mac.update(msg);
             mac.finalize().into_bytes().to_vec()
         }
         Algorithm::Sha512 => {
-            let mut mac =
-                <Hmac<Sha512>>::new_from_slice(key).expect("HMAC accepts any key length");
+            let mut mac = <Hmac<Sha512>>::new_from_slice(key).expect("HMAC accepts any key length");
             mac.update(msg);
             mac.finalize().into_bytes().to_vec()
         }
@@ -198,5 +196,56 @@ mod tests {
         assert_eq!(seconds_remaining(0, 30), 30);
         assert_eq!(seconds_remaining(29, 30), 1);
         assert_eq!(seconds_remaining(30, 30), 30);
+    }
+
+    /// Digit truncation is a suffix relationship: the 6-digit code is the low
+    /// six digits of the 8-digit code for the same HMAC output (RFC 4226 §5.3
+    /// takes `bin_code mod 10^digits`). Pinned against the RFC 6238 vector at
+    /// T=59 (8-digit SHA1 = 94287082).
+    #[test]
+    fn digit_count_truncates_the_same_bin_code() {
+        let secret = b"12345678901234567890";
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 59, 30, 0, 8).unwrap(),
+            94287082
+        );
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 59, 30, 0, 7).unwrap(),
+            4287082
+        );
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 59, 30, 0, 6).unwrap(),
+            287082
+        );
+    }
+
+    /// All timestamps inside one period share a counter (identical code), and a
+    /// nonzero `t0` shifts the window: T=89 with t0=30 is the same counter as
+    /// T=59 with t0=0.
+    #[test]
+    fn totp_window_and_t0_offset_semantics() {
+        let secret = b"12345678901234567890";
+        let at_59 = totp_at(Algorithm::Sha1, secret, 59, 30, 0, 8).unwrap();
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 30, 30, 0, 8).unwrap(),
+            at_59
+        );
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 89, 30, 30, 8).unwrap(),
+            at_59
+        );
+        // A time before t0 saturates to counter 0 rather than underflowing.
+        let at_0 = totp_at(Algorithm::Sha1, secret, 0, 30, 0, 8).unwrap();
+        assert_eq!(
+            totp_at(Algorithm::Sha1, secret, 5, 30, 100, 8).unwrap(),
+            at_0
+        );
+    }
+
+    #[test]
+    fn eight_digit_codes_format_full_width() {
+        assert_eq!(format_code(94287082, 8), "94287082");
+        assert_eq!(format_code(7081804, 8), "07081804");
+        assert_eq!(format_code(0, 8), "00000000");
     }
 }

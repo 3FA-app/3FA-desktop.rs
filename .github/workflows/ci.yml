@@ -1,0 +1,26 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No build artifacts or env files tracked
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)(target/|\.direnv/|\.env$|result$)' || true)
+          if [ -n "$bad" ]; then echo "forbidden tracked files:"; echo "$bad"; exit 1; fi
+      # The Slint GUI needs display/system deps; the core library is explicitly
+      # designed to build and test headless (see Cargo.toml `gui` feature note).
+      - run: cargo check --no-default-features
+      - run: cargo test --no-default-features
+  fmt:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --check

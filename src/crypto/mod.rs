@@ -10,13 +10,13 @@
 //!
 //! Every key buffer is held in `Zeroizing`/`Zeroize` so it is wiped on drop.
 
+use crate::protocol::KdfParams;
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
 };
 use rand::RngCore;
-use crate::protocol::KdfParams;
 use zeroize::{Zeroize, Zeroizing};
 
 pub const KEY_LEN: usize = 32;
@@ -40,11 +40,7 @@ pub type SecretKey = Zeroizing<[u8; KEY_LEN]>;
 
 /// Derive a key from a low-entropy secret (passcode or account password) using
 /// Argon2id with the supplied parameters and salt.
-pub fn derive_key(
-    secret: &[u8],
-    salt: &[u8],
-    params: KdfParams,
-) -> Result<SecretKey, CryptoError> {
+pub fn derive_key(secret: &[u8], salt: &[u8], params: KdfParams) -> Result<SecretKey, CryptoError> {
     let p = Params::new(
         params.mem_kib,
         params.iterations,
@@ -91,7 +87,13 @@ pub fn seal(key: &[u8; KEY_LEN], plaintext: &[u8], aad: &[u8]) -> Result<Sealed,
     let nonce = XNonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
-        .encrypt(nonce, Payload { msg: plaintext, aad })
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| CryptoError::Encrypt)?;
 
     Ok(Sealed {
@@ -165,7 +167,10 @@ mod tests {
         let key = random_key();
         let other = random_key();
         let sealed = seal(&key, b"secret", b"").unwrap();
-        assert!(matches!(open(&other, &sealed, b""), Err(CryptoError::Decrypt)));
+        assert!(matches!(
+            open(&other, &sealed, b""),
+            Err(CryptoError::Decrypt)
+        ));
     }
 
     #[test]
@@ -203,5 +208,41 @@ mod tests {
         let wrapped = wrap_key(&kek, &dek).unwrap();
         let unwrapped = unwrap_key(&kek, &wrapped).unwrap();
         assert_eq!(&*dek, &*unwrapped);
+    }
+
+    /// Sealing the same plaintext twice must draw a fresh nonce each time (nonce
+    /// reuse under XChaCha20-Poly1305 is catastrophic), which also makes the
+    /// ciphertexts differ.
+    #[test]
+    fn nonce_is_unique_per_seal() {
+        let key = random_key();
+        let a = seal(&key, b"same plaintext", b"").unwrap();
+        let b = seal(&key, b"same plaintext", b"").unwrap();
+        assert_ne!(a.nonce, b.nonce, "nonce reused across seals");
+        assert_ne!(a.ciphertext, b.ciphertext);
+        // Both still open to the same plaintext.
+        assert_eq!(&*open(&key, &a, b"").unwrap(), b"same plaintext");
+        assert_eq!(&*open(&key, &b, b"").unwrap(), b"same plaintext");
+    }
+
+    /// Different salts must yield different keys for the same passcode —
+    /// otherwise two vaults created with the same passcode share a KEK.
+    #[test]
+    fn derive_key_depends_on_salt() {
+        let a = derive_key(b"123456", &[1u8; SALT_LEN], fast_params()).unwrap();
+        let b = derive_key(b"123456", &[2u8; SALT_LEN], fast_params()).unwrap();
+        assert_ne!(&*a, &*b);
+    }
+
+    /// A wrapped blob whose plaintext is not exactly KEY_LEN bytes must be
+    /// rejected as a key, not silently truncated or padded.
+    #[test]
+    fn unwrap_rejects_wrong_length_plaintext() {
+        let kek = random_key();
+        let not_a_key = seal(&kek, b"only-10-by", b"3fa-dek-wrap-v1").unwrap();
+        assert!(matches!(
+            unwrap_key(&kek, &not_a_key),
+            Err(CryptoError::KeyLen)
+        ));
     }
 }

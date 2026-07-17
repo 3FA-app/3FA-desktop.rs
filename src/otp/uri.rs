@@ -253,4 +253,43 @@ mod tests {
             Err(UriError::Malformed(_))
         ));
     }
+
+    /// Base32 decode edges: padded secrets (QR generators differ on emitting
+    /// `=`) must decode to the same key bytes as the canonical unpadded form.
+    /// "JBSWY3DP" -> "Hello" is a fixed RFC 4648 decode.
+    #[test]
+    fn base32_padding_is_tolerated() {
+        let unpadded = OtpAccount::from_uri("otpauth://totp/x?secret=JBSWY3DP").unwrap();
+        assert_eq!(unpadded.secret, b"Hello");
+        let padded = OtpAccount::from_uri("otpauth://totp/x?secret=JBSWY3DP%3D%3D%3D%3D").unwrap();
+        assert_eq!(padded.secret, unpadded.secret);
+    }
+
+    #[test]
+    fn missing_or_empty_secret_is_rejected() {
+        assert!(matches!(
+            OtpAccount::from_uri("otpauth://totp/x?issuer=NoSecret"),
+            Err(UriError::BadSecret)
+        ));
+        assert!(matches!(
+            OtpAccount::from_uri("otpauth://totp/x?secret="),
+            Err(UriError::BadSecret)
+        ));
+        // Padding-only decodes to zero bytes and must also be rejected.
+        assert!(matches!(
+            OtpAccount::from_uri("otpauth://totp/x?secret=%3D%3D%3D"),
+            Err(UriError::BadSecret)
+        ));
+    }
+
+    #[test]
+    fn unknown_query_params_are_ignored() {
+        let acct = OtpAccount::from_uri(
+            "otpauth://totp/x?secret=JBSWY3DP&image=https%3A%2F%2Fx.example&foo=bar",
+        )
+        .unwrap();
+        assert_eq!(acct.secret, b"Hello");
+        assert_eq!(acct.digits, 6);
+        assert_eq!(acct.period, 30);
+    }
 }
