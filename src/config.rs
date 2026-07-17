@@ -112,7 +112,7 @@ mod tests {
         let mut c = SyncConfig {
             server_url: "https://s.test".into(),
             username: "alice".into(),
-            device_id: String::new(),
+            ..Default::default()
         };
         c.ensure_device_id();
         c.save(&p).unwrap();
