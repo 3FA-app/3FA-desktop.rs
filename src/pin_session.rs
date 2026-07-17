@@ -387,6 +387,31 @@ mod tests {
     }
 
     #[test]
+    fn session_file_round_trips_and_carries_guard_state() {
+        let mut p = std::env::temp_dir();
+        p.push(format!("3fa-session-{}.sealed", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+
+        let mut f = SealedSessionFile::new(seal(&secrets(), b"314159").unwrap());
+        f.failures = 3;
+        f.last_failure_unix = 1_700_000_000;
+        f.save(&p).unwrap();
+
+        let back = SealedSessionFile::load(&p).unwrap();
+        assert_eq!(back.failures, 3);
+        assert_eq!(back.last_failure_unix, 1_700_000_000);
+        let opened = open(&back.sealed, b"314159").unwrap();
+        assert_eq!(opened.refresh_token, "rt-abc123");
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn session_file_load_missing_is_none() {
+        assert!(SealedSessionFile::load(std::path::Path::new("/nonexistent/x")).is_none());
+    }
+
+    #[test]
     fn guard_success_resets() {
         let mut g = PinGuard::new(6);
         g.record_failure();
