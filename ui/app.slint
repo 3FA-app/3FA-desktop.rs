@@ -102,6 +102,10 @@ export component AppWindow inherits Window {
     callback sync-register(string, string, string); // server, username, password
     callback sync-login(string, string, string);    // server, username, password
     callback sync-now(string, string, string);       // server, username, password
+    // server, email, supabase-password, sync-passphrase, pin
+    callback sync-supabase-signin(string, string, string, string, string);
+    // server, pin, sync-passphrase
+    callback sync-pin-unlock(string, string, string);
 
     VerticalBox {
         padding: 20px;
