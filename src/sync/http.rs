@@ -146,9 +146,11 @@ pub struct HttpTransport {
 
 impl HttpTransport {
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self, SyncError> {
+        let base_url = base_url.into();
+        require_secure(&base_url)?;
         Ok(Self {
             client: client()?,
-            base_url: base_url.into(),
+            base_url,
             token: token.into(),
         })
     }
