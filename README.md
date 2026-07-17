@@ -68,6 +68,28 @@ cargo test --no-default-features       # headless core only (CI, no display)
 cargo run                              # launch the desktop app
 ```
 
+### Supabase configuration
+
+The Sign in with Supabase controls need the project's (non-secret) URL and anon
+key. Either bake them into release builds at compile time:
+
+```bash
+THREEFA_SUPABASE_URL=https://<ref>.supabase.co \
+THREEFA_SUPABASE_ANON_KEY=<anon-key> cargo build --release
+```
+
+…or set them per-install in `config.json` beside the vault (these override the
+build-time defaults):
+
+```json
+{ "supabase_url": "https://<ref>.supabase.co", "supabase_anon_key": "<anon-key>" }
+```
+
+The Settings screen then offers **Sign in** (email/password → device enrollment,
+optionally sealing a 6-digit PIN session), **Unlock with PIN** (refresh the
+session without re-entering the password), and **Sync now**. The legacy
+username/password controls remain for accounts not yet migrated to Supabase.
+
 ## Releasing
 
 Per-OS binaries are built (one CI runner per OS), wrapped into uniform zips with
