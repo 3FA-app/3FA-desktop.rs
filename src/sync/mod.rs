@@ -17,6 +17,8 @@ use zeroize::Zeroizing;
 
 #[cfg(feature = "sync-net")]
 pub mod http;
+#[cfg(feature = "sync-net")]
+pub mod supabase;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {

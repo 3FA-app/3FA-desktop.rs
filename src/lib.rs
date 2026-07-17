@@ -9,6 +9,7 @@ pub mod auth;
 pub mod config;
 pub mod crypto;
 pub mod otp;
+pub mod pin_session;
 pub mod protocol;
 pub mod qr;
 pub mod session;

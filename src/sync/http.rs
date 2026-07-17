@@ -42,6 +42,33 @@ fn err<E: std::fmt::Display>(e: E) -> SyncError {
     SyncError::Transport(e.to_string())
 }
 
+/// Reject any sync/identity endpoint that is not `https://`. The account/session
+/// credentials and the Supabase JWT travel in these requests; a plain-`http`
+/// endpoint (a typo, a tampered `config.json`, or an attacker-supplied URL) would
+/// send them in cleartext and permit a downgrade. `localhost` over http is allowed
+/// only for developer testing.
+fn require_secure(base_url: &str) -> Result<(), SyncError> {
+    let u = base_url.trim();
+    if u.starts_with("https://") {
+        return Ok(());
+    }
+    // Local-dev exemption: only a genuine loopback host, and only in debug builds.
+    // The host must be followed by a port/path/end boundary so a public host like
+    // `localhost.evil.com` can't sneak past the prefix check.
+    let is_local_http = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
+        .iter()
+        .any(|p| {
+            u.strip_prefix(p)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+        });
+    if is_local_http && cfg!(debug_assertions) {
+        return Ok(());
+    }
+    Err(SyncError::Transport(format!(
+        "refusing to use insecure sync URL {u:?}: only https:// is allowed"
+    )))
+}
+
 /// Trim a trailing slash so `{base}/v1/...` never doubles up.
 fn join(base: &str, path: &str) -> String {
     format!("{}{}", base.trim_end_matches('/'), path)
@@ -74,6 +101,7 @@ fn post_creds(
     password: &str,
     device_name: &str,
 ) -> Result<TokenResponse, SyncError> {
+    require_secure(base_url)?;
     let resp = client()?
         .post(join(base_url, path))
         .json(&CredsRequest {
@@ -81,6 +109,32 @@ fn post_creds(
             password,
             device_name,
         })
+        .send()
+        .map_err(err)?;
+    if !resp.status().is_success() {
+        return Err(SyncError::Transport(format!("server returned {}", resp.status())));
+    }
+    resp.json::<TokenResponse>().map_err(err)
+}
+
+/// Enroll this device against the backend using a Supabase access JWT (from
+/// [`supabase::sign_in`] / [`supabase::refresh`]). The JWT authenticates; the
+/// backend maps it to an account and returns a long-lived sync token. The
+/// password never leaves Supabase — this is the zero-knowledge login path.
+pub fn enroll_supabase(
+    base_url: &str,
+    access_jwt: &str,
+    device_name: &str,
+) -> Result<TokenResponse, SyncError> {
+    require_secure(base_url)?;
+    #[derive(Serialize)]
+    struct EnrollBody<'a> {
+        device_name: &'a str,
+    }
+    let resp = client()?
+        .post(join(base_url, "/v1/auth/supabase"))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {access_jwt}"))
+        .json(&EnrollBody { device_name })
         .send()
         .map_err(err)?;
     if !resp.status().is_success() {
@@ -98,9 +152,11 @@ pub struct HttpTransport {
 
 impl HttpTransport {
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self, SyncError> {
+        let base_url = base_url.into();
+        require_secure(&base_url)?;
         Ok(Self {
             client: client()?,
-            base_url: base_url.into(),
+            base_url,
             token: token.into(),
         })
     }
@@ -178,5 +234,20 @@ mod tests {
     fn join_trims_trailing_slash() {
         assert_eq!(join("https://x.test/", "/v1/vault"), "https://x.test/v1/vault");
         assert_eq!(join("https://x.test", "/v1/vault"), "https://x.test/v1/vault");
+    }
+
+    #[test]
+    fn require_secure_allows_https_and_rejects_http() {
+        assert!(require_secure("https://sync.example.com").is_ok());
+        assert!(require_secure("http://sync.example.com").is_err());
+        assert!(require_secure("ftp://sync.example.com").is_err());
+        // A public host that merely contains "localhost" in a later segment must
+        // not slip through the local-dev exemption.
+        assert!(require_secure("http://localhost.evil.com").is_err());
+    }
+
+    #[test]
+    fn http_transport_rejects_insecure_url() {
+        assert!(HttpTransport::new("http://sync.example.com", "tok").is_err());
     }
 }
