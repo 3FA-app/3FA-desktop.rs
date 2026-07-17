@@ -53,7 +53,8 @@ src/crypto/    Argon2id KDF, XChaCha20-Poly1305 seal/open, key wrap
 src/vault/     Encrypted at-rest vault file format
 src/auth/      AuthFactor trait, passcode, biometric (per-OS), passkey, voice
 src/session.rs Auto-lock state machine (90s / 5min)
-src/sync/      Zero-knowledge sync client
+src/pin_session.rs  PIN-sealed Supabase session + entry throttle (PinGuard)
+src/sync/      Zero-knowledge sync client + Supabase auth client
 src/protocol.rs  Wire-protocol DTOs (duplicated with the backend)
 ui/            Slint UI markup
 scripts/release/ Package binaries into per-OS zips + publish to S3
