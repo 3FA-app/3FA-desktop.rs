@@ -102,6 +102,10 @@ export component AppWindow inherits Window {
     callback sync-register(string, string, string); // server, username, password
     callback sync-login(string, string, string);    // server, username, password
     callback sync-now(string, string, string);       // server, username, password
+    // server, email, supabase-password, sync-passphrase, pin
+    callback sync-supabase-signin(string, string, string, string, string);
+    // server, pin, sync-passphrase
+    callback sync-pin-unlock(string, string, string);
 
     VerticalBox {
         padding: 20px;
@@ -309,7 +313,7 @@ export component AppWindow inherits Window {
             }
 
             Text {
-                text: "Accounts are end-to-end encrypted with your account password before upload — the server only ever stores ciphertext.";
+                text: "Accounts are end-to-end encrypted with your sync passphrase before upload — the server only ever stores ciphertext. Your Supabase login is separate and is never used as the encryption key.";
                 color: #8a90a0;
                 font-size: 12px;
                 wrap: word-wrap;
@@ -320,30 +324,66 @@ export component AppWindow inherits Window {
                 placeholder-text: "https://3fa-sync.example.com";
                 text: root.sync-server;
             }
-            Text { text: "Account username"; color: #aeb4c2; font-size: 12px; }
-            usr := LineEdit {
-                placeholder-text: "username";
-                text: root.sync-username;
-            }
-            Text { text: "Account password (never sent — derives the E2E key)"; color: #aeb4c2; font-size: 12px; }
-            pwd := LineEdit {
-                placeholder-text: "account password";
+            Text { text: "Sync passphrase (never sent — derives the E2E key)"; color: #aeb4c2; font-size: 12px; }
+            passphrase := LineEdit {
+                placeholder-text: "sync passphrase";
                 input-type: password;
             }
 
+            // ---- Supabase login (primary) ----
+            Text { text: "Sign in with Supabase"; color: white; font-size: 15px; }
+            Text { text: "Email"; color: #aeb4c2; font-size: 12px; }
+            sb-email := LineEdit {
+                placeholder-text: "you@example.com";
+                text: root.sync-username;
+            }
+            Text { text: "Supabase password"; color: #aeb4c2; font-size: 12px; }
+            sb-pwd := LineEdit {
+                placeholder-text: "supabase password";
+                input-type: password;
+            }
+            Text { text: "6-digit PIN (optional — skips re-login when the session expires)"; color: #aeb4c2; font-size: 12px; }
+            sb-pin := LineEdit {
+                placeholder-text: "······";
+                input-type: password;
+            }
             HorizontalBox {
                 spacing: 10px;
                 Button {
-                    text: "Sync now";
-                    clicked => { root.sync-now(srv.text, usr.text, pwd.text); }
+                    text: "Sign in";
+                    clicked => {
+                        root.sync-supabase-signin(srv.text, sb-email.text, sb-pwd.text, passphrase.text, sb-pin.text);
+                    }
                 }
                 Button {
+                    text: "Unlock with PIN";
+                    clicked => { root.sync-pin-unlock(srv.text, sb-pin.text, passphrase.text); }
+                }
+                Button {
+                    text: "Sync now";
+                    clicked => { root.sync-now(srv.text, sb-email.text, passphrase.text); }
+                }
+            }
+
+            // ---- Legacy username/password (being phased out) ----
+            Text { text: "Or use a legacy account"; color: #6b7180; font-size: 12px; }
+            usr := LineEdit {
+                placeholder-text: "legacy username";
+                text: root.sync-username;
+            }
+            legacy-pwd := LineEdit {
+                placeholder-text: "legacy account password";
+                input-type: password;
+            }
+            HorizontalBox {
+                spacing: 10px;
+                Button {
                     text: "Log in";
-                    clicked => { root.sync-login(srv.text, usr.text, pwd.text); }
+                    clicked => { root.sync-login(srv.text, usr.text, legacy-pwd.text); }
                 }
                 Button {
                     text: "Register";
-                    clicked => { root.sync-register(srv.text, usr.text, pwd.text); }
+                    clicked => { root.sync-register(srv.text, usr.text, legacy-pwd.text); }
                 }
             }
 

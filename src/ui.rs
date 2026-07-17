@@ -19,10 +19,15 @@ use threefa_core::auth::{FactorProof, PolicyEngine};
 use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
+use threefa_core::pin_session::{self, PinGate, PinGuard, SealedSessionFile, SessionSecrets};
 use threefa_core::session::{PollResult, Session};
 use threefa_core::sync::http;
+use threefa_core::sync::supabase::{self, SupabaseConfig};
 use threefa_core::vault::{StoredAccount, VaultData, VaultFile};
 use threefa_core::{data_dir, VAULT_FILENAME};
+
+/// Wipe-after-N threshold for PIN attempts (see [`PinGuard`]).
+const MAX_PIN_FAILURES: u32 = 10;
 
 slint::include_modules!();
 
@@ -361,6 +366,227 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let Some(app) = weak.upgrade() else { return };
             sync_run(&app, &state, server.as_str(), username.as_str(), password.as_str());
         });
+    }
+    // --- Supabase sign-in: identity → enroll device → optional PIN session ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_sync_supabase_signin(move |server, email, password, passphrase, pin| {
+            let Some(app) = weak.upgrade() else { return };
+            supabase_signin(
+                &app, &state,
+                server.as_str(), email.as_str(), password.as_str(),
+                passphrase.as_str(), pin.as_str(),
+            );
+        });
+    }
+    // --- PIN unlock: refresh the Supabase session without email/password ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_sync_pin_unlock(move |server, pin, passphrase| {
+            let Some(app) = weak.upgrade() else { return };
+            pin_unlock(&app, &state, server.as_str(), pin.as_str(), passphrase.as_str());
+        });
+    }
+}
+
+/// Resolve the Supabase client config (config.json override, else build-time
+/// default), or explain what's missing.
+fn supabase_config(state: &Rc<RefCell<AppState>>) -> Result<SupabaseConfig, String> {
+    let s = state.borrow();
+    match (s.sync_cfg.supabase_url(), s.sync_cfg.supabase_anon_key()) {
+        (Some(url), Some(key)) => Ok(SupabaseConfig {
+            project_url: url.to_string(),
+            anon_key: key.to_string(),
+        }),
+        _ => Err(
+            "Supabase is not configured — set supabase_url and supabase_anon_key in config.json"
+                .to_string(),
+        ),
+    }
+}
+
+/// Sign in with Supabase, enroll this device with the sync server, store the
+/// sync token in the OS keychain, seal a PIN session (if a PIN was provided),
+/// then run a sync sealed under the separate passphrase.
+fn supabase_signin(
+    app: &AppWindow,
+    state: &Rc<RefCell<AppState>>,
+    server: &str,
+    email: &str,
+    password: &str,
+    passphrase: &str,
+    pin: &str,
+) {
+    if server.is_empty() || email.is_empty() || password.is_empty() {
+        app.set_sync_status("Enter server, email and password".into());
+        return;
+    }
+    let cfg = match supabase_config(state) {
+        Ok(c) => c,
+        Err(msg) => {
+            app.set_sync_status(msg.into());
+            return;
+        }
+    };
+
+    let session = match supabase::sign_in(&cfg, email, password) {
+        Ok(s) => s,
+        Err(e) => {
+            app.set_sync_status(format!("Supabase sign-in failed: {e}").into());
+            return;
+        }
+    };
+    let tok = match http::enroll_supabase(server, &session.access_token, "3FA Desktop") {
+        Ok(t) => t,
+        Err(e) => {
+            app.set_sync_status(format!("Device enrollment failed: {e}").into());
+            return;
+        }
+    };
+    if let Err(e) = http::keystore::save_token(server, &tok.sync_token) {
+        app.set_sync_status(format!("Could not store token: {e}").into());
+        return;
+    }
+
+    // Seal the refresh + sync tokens under the PIN so an expired access JWT can
+    // be refreshed with the PIN alone. Optional: skipping just means a full
+    // sign-in on expiry.
+    if !pin.is_empty() {
+        let secrets = SessionSecrets {
+            refresh_token: session.refresh_token.clone(),
+            sync_token: tok.sync_token.clone(),
+        };
+        match pin_session::seal(&secrets, pin.as_bytes()) {
+            Ok(sealed) => {
+                if let Err(e) = SealedSessionFile::new(sealed).save(&pin_session::session_path()) {
+                    app.set_sync_status(format!("Could not store PIN session: {e}").into());
+                    return;
+                }
+            }
+            Err(e) => {
+                app.set_sync_status(format!("PIN not set: {e}").into());
+                return;
+            }
+        }
+    }
+
+    save_sync_identity(app, state, server, email);
+    app.set_sync_status("Signed in with Supabase — syncing…".into());
+    if passphrase.is_empty() {
+        app.set_sync_status(
+            "Signed in. Enter your sync passphrase and press Sync now to sync the vault.".into(),
+        );
+        return;
+    }
+    sync_run(app, state, server, email, passphrase);
+}
+
+/// Unlock the sealed session with the PIN, refresh the Supabase session, rotate
+/// the sealed file (Supabase rotates refresh tokens), and sync. Full sign-in is
+/// only needed if the refresh token itself was revoked.
+fn pin_unlock(
+    app: &AppWindow,
+    state: &Rc<RefCell<AppState>>,
+    server: &str,
+    pin: &str,
+    passphrase: &str,
+) {
+    // Fall back to the configured server/username when the fields are blank
+    // (typical on a PIN unlock — identity was saved at sign-in).
+    let (cfg_server, cfg_user) = {
+        let s = state.borrow();
+        (s.sync_cfg.server_url.clone(), s.sync_cfg.username.clone())
+    };
+    let server = if server.is_empty() { cfg_server } else { server.to_string() };
+    if server.is_empty() {
+        app.set_sync_status("Enter the sync server URL".into());
+        return;
+    }
+
+    let path = pin_session::session_path();
+    let Some(mut file) = SealedSessionFile::load(&path) else {
+        app.set_sync_status("No PIN session on this device — sign in with Supabase first".into());
+        return;
+    };
+
+    // Enforce backoff/wipe before touching the sealed blob.
+    let guard = PinGuard::from_failures(file.failures, MAX_PIN_FAILURES);
+    let since_last_failure = Duration::from_secs(now_unix().saturating_sub(file.last_failure_unix));
+    match guard.gate(since_last_failure) {
+        PinGate::Allow => {}
+        PinGate::Backoff { seconds } => {
+            app.set_sync_status(format!("Too many attempts — try again in {seconds}s").into());
+            return;
+        }
+        PinGate::Wipe => {
+            let _ = std::fs::remove_file(&path);
+            app.set_sync_status(
+                "Too many failed PIN attempts — session wiped; sign in with Supabase".into(),
+            );
+            return;
+        }
+    }
+
+    let secrets = match pin_session::open(&file.sealed, pin.as_bytes()) {
+        Ok(s) => s,
+        Err(e) => {
+            file.failures = file.failures.saturating_add(1);
+            file.last_failure_unix = now_unix();
+            let wiped = file.failures >= MAX_PIN_FAILURES;
+            if wiped {
+                let _ = std::fs::remove_file(&path);
+            } else {
+                let _ = file.save(&path);
+            }
+            app.set_sync_status(
+                if wiped {
+                    "Too many failed PIN attempts — session wiped; sign in with Supabase".into()
+                } else {
+                    format!("PIN rejected: {e}")
+                }
+                .into(),
+            );
+            return;
+        }
+    };
+
+    let cfg = match supabase_config(state) {
+        Ok(c) => c,
+        Err(msg) => {
+            app.set_sync_status(msg.into());
+            return;
+        }
+    };
+    let session = match supabase::refresh(&cfg, &secrets.refresh_token) {
+        Ok(s) => s,
+        Err(e) => {
+            app.set_sync_status(
+                format!("Session expired ({e}) — sign in with Supabase again").into(),
+            );
+            return;
+        }
+    };
+
+    // Re-enroll to get a fresh sync token (covers server-side revocation), and
+    // reseal under the same PIN with the rotated refresh token.
+    let sync_token = match http::enroll_supabase(&server, &session.access_token, "3FA Desktop") {
+        Ok(t) => t.sync_token,
+        Err(_) => secrets.sync_token.clone(), // enrollment optional if token still valid
+    };
+    let _ = http::keystore::save_token(&server, &sync_token);
+    let rotated = SessionSecrets {
+        refresh_token: session.refresh_token.clone(),
+        sync_token: sync_token.clone(),
+    };
+    if let Ok(sealed) = pin_session::seal(&rotated, pin.as_bytes()) {
+        let _ = SealedSessionFile::new(sealed).save(&path);
+    }
+
+    app.set_sync_status("Session refreshed with PIN".into());
+    if !passphrase.is_empty() {
+        sync_run(app, state, &server, &cfg_user, passphrase);
     }
 }
 
