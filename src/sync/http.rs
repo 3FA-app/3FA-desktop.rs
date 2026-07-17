@@ -229,4 +229,19 @@ mod tests {
         assert_eq!(join("https://x.test/", "/v1/vault"), "https://x.test/v1/vault");
         assert_eq!(join("https://x.test", "/v1/vault"), "https://x.test/v1/vault");
     }
+
+    #[test]
+    fn require_secure_allows_https_and_rejects_http() {
+        assert!(require_secure("https://sync.example.com").is_ok());
+        assert!(require_secure("http://sync.example.com").is_err());
+        assert!(require_secure("ftp://sync.example.com").is_err());
+        // A public host that merely contains "localhost" in a later segment must
+        // not slip through the local-dev exemption.
+        assert!(require_secure("http://localhost.evil.com").is_err());
+    }
+
+    #[test]
+    fn http_transport_rejects_insecure_url() {
+        assert!(HttpTransport::new("http://sync.example.com", "tok").is_err());
+    }
 }
