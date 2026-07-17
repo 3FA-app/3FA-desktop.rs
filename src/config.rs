@@ -55,6 +55,23 @@ impl SyncConfig {
         }
         &self.device_id
     }
+
+    /// Effective Supabase project URL: config value, else build-time default.
+    /// `None` when neither is set (Supabase login unavailable).
+    pub fn supabase_url(&self) -> Option<&str> {
+        if !self.supabase_url.is_empty() {
+            return Some(&self.supabase_url);
+        }
+        DEFAULT_SUPABASE_URL.filter(|s| !s.is_empty())
+    }
+
+    /// Effective Supabase anon key: config value, else build-time default.
+    pub fn supabase_anon_key(&self) -> Option<&str> {
+        if !self.supabase_anon_key.is_empty() {
+            return Some(&self.supabase_anon_key);
+        }
+        DEFAULT_SUPABASE_ANON_KEY.filter(|s| !s.is_empty())
+    }
 }
 
 /// Standard config path within the per-user data dir.
