@@ -95,6 +95,7 @@ fn post_creds(
     password: &str,
     device_name: &str,
 ) -> Result<TokenResponse, SyncError> {
+    require_secure(base_url)?;
     let resp = client()?
         .post(join(base_url, path))
         .json(&CredsRequest {
@@ -102,6 +103,32 @@ fn post_creds(
             password,
             device_name,
         })
+        .send()
+        .map_err(err)?;
+    if !resp.status().is_success() {
+        return Err(SyncError::Transport(format!("server returned {}", resp.status())));
+    }
+    resp.json::<TokenResponse>().map_err(err)
+}
+
+/// Enroll this device against the backend using a Supabase access JWT (from
+/// [`supabase::sign_in`] / [`supabase::refresh`]). The JWT authenticates; the
+/// backend maps it to an account and returns a long-lived sync token. The
+/// password never leaves Supabase — this is the zero-knowledge login path.
+pub fn enroll_supabase(
+    base_url: &str,
+    access_jwt: &str,
+    device_name: &str,
+) -> Result<TokenResponse, SyncError> {
+    require_secure(base_url)?;
+    #[derive(Serialize)]
+    struct EnrollBody<'a> {
+        device_name: &'a str,
+    }
+    let resp = client()?
+        .post(join(base_url, "/v1/auth/supabase"))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {access_jwt}"))
+        .json(&EnrollBody { device_name })
         .send()
         .map_err(err)?;
     if !resp.status().is_success() {
