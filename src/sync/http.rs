@@ -52,9 +52,15 @@ fn require_secure(base_url: &str) -> Result<(), SyncError> {
     if u.starts_with("https://") {
         return Ok(());
     }
-    let is_local_http = u.starts_with("http://localhost")
-        || u.starts_with("http://127.0.0.1")
-        || u.starts_with("http://[::1]");
+    // Local-dev exemption: only a genuine loopback host, and only in debug builds.
+    // The host must be followed by a port/path/end boundary so a public host like
+    // `localhost.evil.com` can't sneak past the prefix check.
+    let is_local_http = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
+        .iter()
+        .any(|p| {
+            u.strip_prefix(p)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+        });
     if is_local_http && cfg!(debug_assertions) {
         return Ok(());
     }
