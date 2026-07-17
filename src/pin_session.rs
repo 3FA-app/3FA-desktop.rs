@@ -174,6 +174,48 @@ pub fn open(sealed: &SealedSession, pin: &[u8]) -> Result<SessionSecrets, PinErr
     serde_json::from_slice(&plain).map_err(|e| PinError::Serde(e.to_string()))
 }
 
+/// On-disk wrapper for a sealed session: the blob plus the PIN-guard state, so
+/// failed-attempt backoff survives an app restart (otherwise a guesser could
+/// just relaunch to reset the clock). Written 0600 via
+/// [`crate::write_private_atomic`], like the vault.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SealedSessionFile {
+    pub sealed: SealedSession,
+    #[serde(default)]
+    pub failures: u32,
+    /// Unix seconds of the most recent failed attempt (0 = never).
+    #[serde(default)]
+    pub last_failure_unix: u64,
+}
+
+/// Standard sealed-session path within the per-user data dir.
+pub fn session_path() -> std::path::PathBuf {
+    crate::data_dir().join("session.sealed")
+}
+
+impl SealedSessionFile {
+    pub fn new(sealed: SealedSession) -> Self {
+        Self {
+            sealed,
+            failures: 0,
+            last_failure_unix: 0,
+        }
+    }
+
+    /// Load from `path`; `None` if missing or unparsable (treat as "no session").
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Persist atomically with owner-only permissions.
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        crate::write_private_atomic(path, &bytes)
+    }
+}
+
 /// Attempt throttle + lockout for PIN entry. A 6-digit PIN is only 10^6 codes, so
 /// unthrottled entry is guessable; this enforces escalating backoff and an
 /// optional wipe-after-N so a lost/stolen laptop can't be PIN-brute-forced at the
