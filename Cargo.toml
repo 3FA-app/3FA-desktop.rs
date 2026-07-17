@@ -75,7 +75,6 @@ keyring = { version = "3", optional = true }
 slint-build = "1.8"
 
 [dev-dependencies]
-hex = "0.4"
 # Render QR PNGs in tests to exercise the decode path end to end.
 qrcode = "0.14"
 
