@@ -42,6 +42,27 @@ fn err<E: std::fmt::Display>(e: E) -> SyncError {
     SyncError::Transport(e.to_string())
 }
 
+/// Reject any sync/identity endpoint that is not `https://`. The account/session
+/// credentials and the Supabase JWT travel in these requests; a plain-`http`
+/// endpoint (a typo, a tampered `config.json`, or an attacker-supplied URL) would
+/// send them in cleartext and permit a downgrade. `localhost` over http is allowed
+/// only for developer testing.
+fn require_secure(base_url: &str) -> Result<(), SyncError> {
+    let u = base_url.trim();
+    if u.starts_with("https://") {
+        return Ok(());
+    }
+    let is_local_http = u.starts_with("http://localhost")
+        || u.starts_with("http://127.0.0.1")
+        || u.starts_with("http://[::1]");
+    if is_local_http && cfg!(debug_assertions) {
+        return Ok(());
+    }
+    Err(SyncError::Transport(format!(
+        "refusing to use insecure sync URL {u:?}: only https:// is allowed"
+    )))
+}
+
 /// Trim a trailing slash so `{base}/v1/...` never doubles up.
 fn join(base: &str, path: &str) -> String {
     format!("{}{}", base.trim_end_matches('/'), path)
