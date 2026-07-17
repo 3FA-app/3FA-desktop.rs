@@ -19,10 +19,15 @@ use threefa_core::auth::{FactorProof, PolicyEngine};
 use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
+use threefa_core::pin_session::{self, PinGate, PinGuard, SealedSessionFile, SessionSecrets};
 use threefa_core::session::{PollResult, Session};
 use threefa_core::sync::http;
+use threefa_core::sync::supabase::{self, SupabaseConfig};
 use threefa_core::vault::{StoredAccount, VaultData, VaultFile};
 use threefa_core::{data_dir, VAULT_FILENAME};
+
+/// Wipe-after-N threshold for PIN attempts (see [`PinGuard`]).
+const MAX_PIN_FAILURES: u32 = 10;
 
 slint::include_modules!();
 
