@@ -144,6 +144,9 @@ mod tests {
     fn insecure_project_url_is_rejected() {
         assert!(require_https("http://proj.supabase.co").is_err());
         assert!(require_https("https://proj.supabase.co").is_ok());
+        // Case-insensitive scheme.
+        assert!(require_https("HTTPS://proj.supabase.co").is_ok());
+        assert!(require_https("ftp://proj.supabase.co").is_err());
     }
 
     #[test]
