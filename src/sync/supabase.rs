@@ -50,7 +50,13 @@ fn client() -> Result<reqwest::blocking::Client, SyncError> {
 }
 
 fn require_https(url: &str) -> Result<(), SyncError> {
-    if url.trim().starts_with("https://") {
+    // Scheme comparison is case-insensitive (RFC 3986).
+    let scheme = url
+        .trim()
+        .split_once("://")
+        .map(|(s, _)| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    if scheme == "https" {
         Ok(())
     } else {
         Err(SyncError::Transport(format!(
@@ -138,6 +144,9 @@ mod tests {
     fn insecure_project_url_is_rejected() {
         assert!(require_https("http://proj.supabase.co").is_err());
         assert!(require_https("https://proj.supabase.co").is_ok());
+        // Case-insensitive scheme.
+        assert!(require_https("HTTPS://proj.supabase.co").is_ok());
+        assert!(require_https("ftp://proj.supabase.co").is_err());
     }
 
     #[test]

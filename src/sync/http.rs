@@ -49,19 +49,22 @@ fn err<E: std::fmt::Display>(e: E) -> SyncError {
 /// only for developer testing.
 fn require_secure(base_url: &str) -> Result<(), SyncError> {
     let u = base_url.trim();
-    if u.starts_with("https://") {
+    // URL schemes are case-insensitive (RFC 3986), so compare the scheme lowered.
+    let (scheme, rest) = match u.split_once("://") {
+        Some((s, r)) => (s.to_ascii_lowercase(), r),
+        None => (String::new(), u),
+    };
+    if scheme == "https" {
         return Ok(());
     }
-    // Local-dev exemption: only a genuine loopback host, and only in debug builds.
-    // The host must be followed by a port/path/end boundary so a public host like
-    // `localhost.evil.com` can't sneak past the prefix check.
-    let is_local_http = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
-        .iter()
-        .any(|p| {
-            u.strip_prefix(p)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
-        });
-    if is_local_http && cfg!(debug_assertions) {
+    // Local-dev exemption: only plain http to a genuine loopback host, and only in
+    // debug builds. The host must be followed by a port/path/end boundary so a
+    // public host like `localhost.evil.com` can't sneak past the prefix check.
+    let is_loopback = ["localhost", "127.0.0.1", "[::1]"].iter().any(|h| {
+        rest.strip_prefix(h)
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with([':', '/']))
+    });
+    if scheme == "http" && is_loopback && cfg!(debug_assertions) {
         return Ok(());
     }
     Err(SyncError::Transport(format!(
@@ -239,6 +242,10 @@ mod tests {
     #[test]
     fn require_secure_allows_https_and_rejects_http() {
         assert!(require_secure("https://sync.example.com").is_ok());
+        // Scheme is case-insensitive: a valid https URL with an odd-cased scheme
+        // must be accepted, not wrongly rejected.
+        assert!(require_secure("HTTPS://sync.example.com").is_ok());
+        assert!(require_secure("Https://sync.example.com").is_ok());
         assert!(require_secure("http://sync.example.com").is_err());
         assert!(require_secure("ftp://sync.example.com").is_err());
         // A public host that merely contains "localhost" in a later segment must
