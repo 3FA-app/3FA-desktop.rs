@@ -423,6 +423,14 @@ fn supabase_signin(
         app.set_sync_status("Enter server, email and password".into());
         return;
     }
+    // Validate the PIN *before* any network work, so a bad PIN can't leave the
+    // device enrolled and its token stored with no sealed session to unlock it.
+    if !pin.is_empty()
+        && (!pin_session::is_valid_format(pin.as_bytes()) || pin_session::is_weak(pin.as_bytes()))
+    {
+        app.set_sync_status("PIN must be 6 digits and not a trivial sequence".into());
+        return;
+    }
     let cfg = match supabase_config(state) {
         Ok(c) => c,
         Err(msg) => {
