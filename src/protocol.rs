@@ -166,9 +166,19 @@ mod tests {
     fn default_params_are_sane_but_extremes_are_not() {
         assert!(KdfParams::default().is_sane());
         // Memory-exhaustion attempt (~4 GiB) is rejected.
-        assert!(!KdfParams { mem_kib: 4_000_000, iterations: 3, parallelism: 1 }.is_sane());
+        assert!(!KdfParams {
+            mem_kib: 4_000_000,
+            iterations: 3,
+            parallelism: 1
+        }
+        .is_sane());
         // Weakened-to-nothing params are rejected.
-        assert!(!KdfParams { mem_kib: 8, iterations: 0, parallelism: 0 }.is_sane());
+        assert!(!KdfParams {
+            mem_kib: 8,
+            iterations: 0,
+            parallelism: 0
+        }
+        .is_sane());
     }
 
     #[test]

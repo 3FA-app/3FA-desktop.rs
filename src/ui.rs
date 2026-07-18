@@ -59,11 +59,7 @@ impl AppState {
     }
 
     fn policy_engine(&self) -> PolicyEngine {
-        let policy = self
-            .data
-            .as_ref()
-            .map(|d| d.policy)
-            .unwrap_or_default();
+        let policy = self.data.as_ref().map(|d| d.policy).unwrap_or_default();
         PolicyEngine::new(policy)
     }
 }
@@ -329,7 +325,11 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_close_settings(move || {
             if let Some(app) = weak.upgrade() {
                 let unlocked = state.borrow().data.is_some();
-                app.set_screen(if unlocked { "vault".into() } else { "lock".into() });
+                app.set_screen(if unlocked {
+                    "vault".into()
+                } else {
+                    "lock".into()
+                });
             }
         });
     }
@@ -341,8 +341,12 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_sync_register(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
             sync_authenticate(
-                &app, &state, AuthKind::Register,
-                server.as_str(), username.as_str(), password.as_str(),
+                &app,
+                &state,
+                AuthKind::Register,
+                server.as_str(),
+                username.as_str(),
+                password.as_str(),
             );
         });
     }
@@ -353,8 +357,12 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_sync_login(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
             sync_authenticate(
-                &app, &state, AuthKind::Login,
-                server.as_str(), username.as_str(), password.as_str(),
+                &app,
+                &state,
+                AuthKind::Login,
+                server.as_str(),
+                username.as_str(),
+                password.as_str(),
             );
         });
     }
@@ -364,7 +372,13 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_now(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
-            sync_run(&app, &state, server.as_str(), username.as_str(), password.as_str());
+            sync_run(
+                &app,
+                &state,
+                server.as_str(),
+                username.as_str(),
+                password.as_str(),
+            );
         });
     }
     // --- Supabase sign-in: identity → enroll device → optional PIN session ---
@@ -374,9 +388,13 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_sync_supabase_signin(move |server, email, password, passphrase, pin| {
             let Some(app) = weak.upgrade() else { return };
             supabase_signin(
-                &app, &state,
-                server.as_str(), email.as_str(), password.as_str(),
-                passphrase.as_str(), pin.as_str(),
+                &app,
+                &state,
+                server.as_str(),
+                email.as_str(),
+                password.as_str(),
+                passphrase.as_str(),
+                pin.as_str(),
             );
         });
     }
@@ -386,7 +404,13 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_pin_unlock(move |server, pin, passphrase| {
             let Some(app) = weak.upgrade() else { return };
-            pin_unlock(&app, &state, server.as_str(), pin.as_str(), passphrase.as_str());
+            pin_unlock(
+                &app,
+                &state,
+                server.as_str(),
+                pin.as_str(),
+                passphrase.as_str(),
+            );
         });
     }
 }
@@ -507,7 +531,11 @@ fn pin_unlock(
         let s = state.borrow();
         (s.sync_cfg.server_url.clone(), s.sync_cfg.username.clone())
     };
-    let server = if server.is_empty() { cfg_server } else { server.to_string() };
+    let server = if server.is_empty() {
+        cfg_server
+    } else {
+        server.to_string()
+    };
     if server.is_empty() {
         app.set_sync_status("Enter the sync server URL".into());
         return;
@@ -604,7 +632,12 @@ enum AuthKind {
 }
 
 /// Persist server/username into config and reflect them in the window.
-fn save_sync_identity(app: &AppWindow, state: &Rc<RefCell<AppState>>, server: &str, username: &str) {
+fn save_sync_identity(
+    app: &AppWindow,
+    state: &Rc<RefCell<AppState>>,
+    server: &str,
+    username: &str,
+) {
     let mut s = state.borrow_mut();
     s.sync_cfg.server_url = server.to_string();
     s.sync_cfg.username = username.to_string();
@@ -813,8 +846,6 @@ fn spawn_tick(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     // Keep the timer alive for the program's lifetime.
     std::mem::forget(timer);
 }
-
-
 
 /// Today the only collectable factor in the GUI is the passcode (native factors
 /// stubbed). Returns an empty set so `try_extend` correctly demands a real second
