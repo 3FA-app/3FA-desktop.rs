@@ -15,6 +15,11 @@ use crate::protocol::{
 use crate::vault::{VaultData, VaultError};
 use zeroize::Zeroizing;
 
+#[cfg(feature = "sync-net")]
+pub mod http;
+#[cfg(feature = "sync-net")]
+pub mod supabase;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
     #[error(transparent)]
@@ -76,6 +81,75 @@ pub fn open_downloaded(blob: &SealedBlob, account_password: &[u8]) -> Result<Vau
     };
     let plain = crypto::open(&key, &sealed, b"3fa-sync-blob-v1")?;
     serde_json::from_slice(&plain).map_err(|e| SyncError::Serde(e.to_string()))
+}
+
+/// Merge a remote vault into the local one without losing enrollments.
+///
+/// Accounts are unioned by their stable `id` (`issuer:label`); on a tie the local
+/// copy wins (it may hold a fresher HOTP counter). Local policy / voiceprint are
+/// authoritative for this device. This is deliberately additive: a sync can add
+/// accounts seen on another device but never silently drop one you hold.
+pub fn merge_vault(local: &VaultData, remote: &VaultData) -> VaultData {
+    let mut accounts = local.accounts.clone();
+    for r in &remote.accounts {
+        if !accounts.iter().any(|a| a.id == r.id) {
+            accounts.push(r.clone());
+        }
+    }
+    VaultData {
+        accounts,
+        policy: local.policy,
+        voiceprint: local.voiceprint.clone(),
+        voice_pin_hash: local.voice_pin_hash.clone(),
+    }
+}
+
+/// Maximum push retries when another device races us between pull and push.
+const SYNC_MAX_ATTEMPTS: u32 = 4;
+
+/// Run one full reconcile against the server: pull the current sealed blob, merge
+/// it into `local`, and push the result. Returns the merged vault and the new
+/// authoritative version vector. Retries on a version-vector conflict (someone
+/// else pushed in between) by re-pulling and re-merging.
+///
+/// The blob is sealed under the **account password** E2E key, so the server only
+/// ever sees ciphertext — the zero-knowledge guarantee holds across sync.
+pub fn synchronize<T: Transport>(
+    transport: &mut T,
+    account_password: &[u8],
+    device_id: &str,
+    local: &VaultData,
+) -> Result<(VaultData, VersionVector), SyncError> {
+    let mut working = local.clone();
+    for _ in 0..SYNC_MAX_ATTEMPTS {
+        let pulled = transport.pull()?;
+        let merged = match &pulled.blob {
+            Some(blob) => {
+                let remote = open_downloaded(blob, account_password)?;
+                merge_vault(&working, &remote)
+            }
+            None => working.clone(),
+        };
+
+        let blob = seal_for_upload(&merged, account_password)?;
+        let req = PushRequest {
+            device_id: device_id.to_string(),
+            blob,
+            base_version: pulled.version.clone(),
+        };
+        match transport.push(&req)? {
+            PushResponse::Ok { version } => return Ok((merged, version)),
+            PushResponse::Conflict { .. } => {
+                // Server advanced under us; fold what we just merged back into the
+                // working set and try again from a fresh pull.
+                working = merged;
+                continue;
+            }
+        }
+    }
+    Err(SyncError::Transport(
+        "sync did not converge after repeated conflicts".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -250,5 +324,119 @@ mod tests {
             !blob.ciphertext.windows(needle.len()).any(|w| w == needle),
             "plaintext issuer leaked into ciphertext"
         );
+    }
+
+    fn account(id: &str) -> StoredAccount {
+        StoredAccount {
+            id: id.into(),
+            issuer: id.split(':').next().unwrap_or(id).into(),
+            label: id.into(),
+            secret: b"12345678901234567890".to_vec(),
+            kind: StoredKind::Totp,
+            algorithm: StoredAlg::Sha1,
+            digits: 6,
+            period: 30,
+            counter: 0,
+        }
+    }
+
+    fn vault_with(ids: &[&str]) -> VaultData {
+        VaultData {
+            accounts: ids.iter().map(|i| account(i)).collect(),
+            policy: FactorPolicy::default(),
+            voiceprint: None,
+            voice_pin_hash: None,
+        }
+    }
+
+    #[test]
+    fn merge_is_additive_and_dedups_by_id() {
+        let local = vault_with(&["GitHub:a", "AWS:b"]);
+        let remote = vault_with(&["AWS:b", "GitLab:c"]);
+        let merged = merge_vault(&local, &remote);
+        let mut ids: Vec<_> = merged.accounts.iter().map(|a| a.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["AWS:b", "GitHub:a", "GitLab:c"]);
+    }
+
+    /// In-memory stand-in for the server: mirrors the backend's version-vector
+    /// reconcile (`vault_blob::reconcile`) so `synchronize` can be exercised
+    /// without a database or network.
+    struct FakeServer {
+        password: Vec<u8>,
+        stored: Option<SealedBlob>,
+        version: VersionVector,
+    }
+
+    fn dominates(a: &VersionVector, b: &VersionVector) -> bool {
+        b.iter().all(|e| {
+            a.iter()
+                .find(|x| x.device_id == e.device_id)
+                .map(|x| x.counter)
+                .unwrap_or(0)
+                >= e.counter
+        })
+    }
+
+    fn bump(base: &VersionVector, device: &str) -> VersionVector {
+        use crate::protocol::VersionEntry;
+        let mut out = base.clone();
+        match out.iter_mut().find(|e| e.device_id == device) {
+            Some(e) => e.counter += 1,
+            None => out.push(VersionEntry {
+                device_id: device.into(),
+                counter: 1,
+            }),
+        }
+        out
+    }
+
+    impl Transport for FakeServer {
+        fn push(&mut self, req: &PushRequest) -> Result<PushResponse, SyncError> {
+            if dominates(&req.base_version, &self.version) {
+                self.version = bump(&req.base_version, &req.device_id);
+                self.stored = Some(req.blob.clone());
+                Ok(PushResponse::Ok {
+                    version: self.version.clone(),
+                })
+            } else {
+                Ok(PushResponse::Conflict {
+                    server_version: self.version.clone(),
+                })
+            }
+        }
+        fn pull(&mut self) -> Result<PullResponse, SyncError> {
+            Ok(PullResponse {
+                blob: self.stored.clone(),
+                version: self.version.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn synchronize_uploads_then_merges_remote_changes() {
+        let password = b"correct horse battery".to_vec();
+        let mut server = FakeServer {
+            password: password.clone(),
+            stored: None,
+            version: Vec::new(),
+        };
+
+        // Device A pushes its first account.
+        let a_local = vault_with(&["GitHub:a"]);
+        let (a_merged, _v) = synchronize(&mut server, &password, "devA", &a_local).unwrap();
+        assert_eq!(a_merged.accounts.len(), 1);
+
+        // Device B (different local set) syncs and should end up holding both.
+        let b_local = vault_with(&["AWS:b"]);
+        let (b_merged, _v) = synchronize(&mut server, &password, "devB", &b_local).unwrap();
+        let mut ids: Vec<_> = b_merged.accounts.iter().map(|a| a.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["AWS:b", "GitHub:a"]);
+
+        // And what's stored decrypts back to the union under the same password.
+        let stored = server.stored.clone().unwrap();
+        let back = open_downloaded(&stored, &server.password).unwrap();
+        assert_eq!(back.accounts.len(), 2);
     }
 }

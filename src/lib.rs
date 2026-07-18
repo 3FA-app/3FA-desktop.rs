@@ -6,9 +6,12 @@
 //! the logic here means it is all unit-testable without a display server.
 
 pub mod auth;
+pub mod config;
 pub mod crypto;
 pub mod otp;
+pub mod pin_session;
 pub mod protocol;
+pub mod qr;
 pub mod session;
 pub mod sync;
 pub mod vault;

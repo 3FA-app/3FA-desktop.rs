@@ -21,7 +21,15 @@ path = "src/main.rs"
 # The GUI is default; `--no-default-features` builds/tests just the core library
 # (useful in CI and headless environments).
 default = ["gui"]
-gui = ["dep:slint", "dep:arboard"]
+# The shipped desktop app: GUI + network sync. (`--no-default-features` still
+# builds/tests just the headless core with neither an HTTP stack nor a display.)
+gui = ["dep:slint", "dep:arboard", "dep:rfd", "sync-net"]
+# Live webcam QR scanning. Off by default so the native camera stack never blocks
+# the core/CI/headless builds; image-import QR works without it.
+camera = ["dep:nokhwa"]
+# Network sync transport (reqwest + OS keychain). Pulled in by `gui`; separable so
+# the core lib and its tests build without an HTTP/TLS stack.
+sync-net = ["dep:reqwest", "dep:keyring"]
 
 [dependencies]
 # Crypto / OTP core — RustCrypto stack, minimal third-party trust.
@@ -39,19 +47,36 @@ base32 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Hex-encode the opaque byte fields of a PIN-sealed session for JSON-at-rest.
+hex = "0.4"
 
 # otpauth:// URI parsing
 url = "2"
 
+# QR decode (image import) — pure-Rust, no display server, so it builds headless
+# and runs in tests. Image codecs restricted to the two formats QR exports use.
+rqrr = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
 # GUI (optional so the core lib builds headless)
 slint = { version = "1.8", optional = true }
 arboard = { version = "3", optional = true }
+# Native file picker for "Scan image" (GUI only).
+rfd = { version = "0.15", optional = true }
+
+# Live webcam capture for QR scanning (optional; see the `camera` feature).
+nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
+
+# Network sync (optional; see the `sync-net` feature).
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["blocking", "json", "rustls-tls"] }
+keyring = { version = "3", optional = true }
 
 [build-dependencies]
 slint-build = "1.8"
 
 [dev-dependencies]
-hex = "0.4"
+# Render QR PNGs in tests to exercise the decode path end to end.
+qrcode = "0.14"
 
 # Optimize for a small, fast binary (security app — not a memory hog).
 [profile.release]

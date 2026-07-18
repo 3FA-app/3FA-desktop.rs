@@ -80,6 +80,10 @@ export component AppWindow inherits Window {
     in property <bool> biometric-available;
     in property <bool> passkey-available;
     in property <bool> voice-available;
+    in property <bool> camera-available;           // built with the `camera` feature
+    in property <string> sync-server;              // configured sync server URL
+    in property <string> sync-username;            // configured account username
+    in property <string> sync-status;              // sync result / error line
 
     // ---- callbacks handled in Rust ----
     callback key-pressed(string);                  // a digit "0".."9"
@@ -88,9 +92,20 @@ export component AppWindow inherits Window {
     callback use-passkey();
     callback use-voice();
     callback add-account(string);                  // an otpauth:// uri
+    callback scan-image();                         // pick an image file, decode its QR
+    callback scan-camera();                         // scan a QR from the webcam
     callback copy-code(string);                    // account id
     callback lock-now();
     callback extend-session();
+    callback open-settings();
+    callback close-settings();
+    callback sync-register(string, string, string); // server, username, password
+    callback sync-login(string, string, string);    // server, username, password
+    callback sync-now(string, string, string);       // server, username, password
+    // server, email, supabase-password, sync-passphrase, pin
+    callback sync-supabase-signin(string, string, string, string, string);
+    // server, pin, sync-passphrase
+    callback sync-pin-unlock(string, string, string);
 
     VerticalBox {
         padding: 20px;
@@ -242,11 +257,29 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // Scan a QR the Authy / Google-Authenticator way: from an image /
+            // screenshot, or (if built with the `camera` feature) the webcam.
+            HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: "Scan image";
+                    clicked => { root.scan-image(); }
+                }
+                if root.camera-available: Button {
+                    text: "Scan camera";
+                    clicked => { root.scan-camera(); }
+                }
+            }
+
             HorizontalBox {
                 spacing: 10px;
                 Button {
                     text: "Keep open (+factor)";
                     clicked => { root.extend-session(); }
+                }
+                Button {
+                    text: "Sync / Settings";
+                    clicked => { root.open-settings(); }
                 }
                 Button {
                     text: "Lock now";
@@ -258,6 +291,107 @@ export component AppWindow inherits Window {
                 text: root.status;
                 color: #8a90a0;
                 font-size: 12px;
+            }
+        }
+
+        // ============================ SETTINGS / SYNC ============================
+        if root.screen == "settings": VerticalBox {
+            spacing: 12px;
+
+            HorizontalBox {
+                Text {
+                    text: "Sync settings";
+                    color: white;
+                    font-size: 20px;
+                    vertical-alignment: center;
+                }
+                Rectangle {} // spacer
+                Button {
+                    text: "Back";
+                    clicked => { root.close-settings(); }
+                }
+            }
+
+            Text {
+                text: "Accounts are end-to-end encrypted with your sync passphrase before upload — the server only ever stores ciphertext. Your Supabase login is separate and is never used as the encryption key.";
+                color: #8a90a0;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+
+            Text { text: "Server URL"; color: #aeb4c2; font-size: 12px; }
+            srv := LineEdit {
+                placeholder-text: "https://3fa-sync.example.com";
+                text: root.sync-server;
+            }
+            Text { text: "Sync passphrase (never sent — derives the E2E key)"; color: #aeb4c2; font-size: 12px; }
+            passphrase := LineEdit {
+                placeholder-text: "sync passphrase";
+                input-type: password;
+            }
+
+            // ---- Supabase login (primary) ----
+            Text { text: "Sign in with Supabase"; color: white; font-size: 15px; }
+            Text { text: "Email"; color: #aeb4c2; font-size: 12px; }
+            sb-email := LineEdit {
+                placeholder-text: "you@example.com";
+                text: root.sync-username;
+            }
+            Text { text: "Supabase password"; color: #aeb4c2; font-size: 12px; }
+            sb-pwd := LineEdit {
+                placeholder-text: "supabase password";
+                input-type: password;
+            }
+            Text { text: "6-digit PIN (optional — skips re-login when the session expires)"; color: #aeb4c2; font-size: 12px; }
+            sb-pin := LineEdit {
+                placeholder-text: "······";
+                input-type: password;
+            }
+            HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: "Sign in";
+                    clicked => {
+                        root.sync-supabase-signin(srv.text, sb-email.text, sb-pwd.text, passphrase.text, sb-pin.text);
+                    }
+                }
+                Button {
+                    text: "Unlock with PIN";
+                    clicked => { root.sync-pin-unlock(srv.text, sb-pin.text, passphrase.text); }
+                }
+                Button {
+                    text: "Sync now";
+                    clicked => { root.sync-now(srv.text, sb-email.text, passphrase.text); }
+                }
+            }
+
+            // ---- Legacy username/password (being phased out) ----
+            Text { text: "Or use a legacy account"; color: #6b7180; font-size: 12px; }
+            usr := LineEdit {
+                placeholder-text: "legacy username";
+                text: root.sync-username;
+            }
+            legacy-pwd := LineEdit {
+                placeholder-text: "legacy account password";
+                input-type: password;
+            }
+            HorizontalBox {
+                spacing: 10px;
+                Button {
+                    text: "Log in";
+                    clicked => { root.sync-login(srv.text, usr.text, legacy-pwd.text); }
+                }
+                Button {
+                    text: "Register";
+                    clicked => { root.sync-register(srv.text, usr.text, legacy-pwd.text); }
+                }
+            }
+
+            Text {
+                text: root.sync-status;
+                color: #8a90a0;
+                font-size: 12px;
+                wrap: word-wrap;
             }
         }
     }
