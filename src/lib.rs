@@ -31,10 +31,7 @@ pub fn write_private_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Re
     use std::io::Write;
 
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("vault");
+    let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("vault");
     // Same directory ⇒ same filesystem ⇒ `rename` is atomic. PID keeps
     // concurrent app instances from colliding on the temp name.
     let tmp = dir.join(format!(".{file_name}.tmp-{}", std::process::id()));
@@ -77,8 +74,7 @@ pub fn data_dir() -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     {
         if let Ok(home) = std::env::var("HOME") {
-            return std::path::Path::new(&home)
-                .join("Library/Application Support/3FA");
+            return std::path::Path::new(&home).join("Library/Application Support/3FA");
         }
     }
     #[cfg(target_os = "windows")]
