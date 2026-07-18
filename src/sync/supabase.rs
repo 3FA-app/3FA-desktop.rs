@@ -50,7 +50,13 @@ fn client() -> Result<reqwest::blocking::Client, SyncError> {
 }
 
 fn require_https(url: &str) -> Result<(), SyncError> {
-    if url.trim().starts_with("https://") {
+    // Scheme comparison is case-insensitive (RFC 3986).
+    let scheme = url
+        .trim()
+        .split_once("://")
+        .map(|(s, _)| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    if scheme == "https" {
         Ok(())
     } else {
         Err(SyncError::Transport(format!(
