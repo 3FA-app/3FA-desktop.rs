@@ -242,6 +242,10 @@ mod tests {
     #[test]
     fn require_secure_allows_https_and_rejects_http() {
         assert!(require_secure("https://sync.example.com").is_ok());
+        // Scheme is case-insensitive: a valid https URL with an odd-cased scheme
+        // must be accepted, not wrongly rejected.
+        assert!(require_secure("HTTPS://sync.example.com").is_ok());
+        assert!(require_secure("Https://sync.example.com").is_ok());
         assert!(require_secure("http://sync.example.com").is_err());
         assert!(require_secure("ftp://sync.example.com").is_err());
         // A public host that merely contains "localhost" in a later segment must
