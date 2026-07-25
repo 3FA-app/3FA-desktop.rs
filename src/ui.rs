@@ -366,6 +366,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_register(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             sync_authenticate(
                 &app,
                 &state,
