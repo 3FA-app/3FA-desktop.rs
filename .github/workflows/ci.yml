@@ -18,6 +18,29 @@ jobs:
       # designed to build and test headless (see Cargo.toml `gui` feature note).
       - run: cargo check --no-default-features
       - run: cargo test --no-default-features
+
+  # The shipped app, with the GUI and networking actually compiled.
+  #
+  # Until now CI built ONLY `--no-default-features`, so src/ui.rs, src/sync/http.rs
+  # and src/sync/supabase.rs — the code that draws the app and carries the sync
+  # token — were never compiled here at all. Every transport-security test lived
+  # behind `sync-net` and therefore never ran, including the one asserting
+  # `localhost.evil.com` is not treated as loopback. A whole class of defect was
+  # structurally invisible.
+  #
+  # macOS rather than Ubuntu on purpose: Slint builds on a mac runner with no
+  # extra system packages, and it is a platform the app actually ships on, so
+  # this job needs no speculative apt-get list to keep working. Compiling and
+  # unit-testing need no display — only *running* the GUI would.
+  gui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add clippy
+      - run: cargo check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
   fmt:
     runs-on: ubuntu-latest
     steps:
