@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
-          repository: 3fa-app/3fa-backend.rs
+          repository: 3FA-app/3fa-backend.rs
           path: backend
           # If the backend repo is private, a PAT with read access is required:
           # token: ${{ secrets.THREEFA_REPO_TOKEN }}
