@@ -9,7 +9,7 @@ use zeroize::ZeroizeOnDrop;
 
 /// One enrolled OTP account. The `secret` is the raw decoded key bytes and is
 /// zeroized on drop so it never lingers in freed memory.
-#[derive(Debug, Clone, PartialEq, Eq, ZeroizeOnDrop)]
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
 pub struct OtpAccount {
     #[zeroize(skip)]
     pub kind: OtpKind,
