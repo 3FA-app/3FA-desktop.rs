@@ -484,8 +484,13 @@ mod tests {
             }
         }
 
-        let err = synchronize(&mut HostileServer, b"pw", "devA", &vault_with(&["GitHub:a"]))
-            .unwrap_err();
+        let err = synchronize(
+            &mut HostileServer,
+            b"pw",
+            "devA",
+            &vault_with(&["GitHub:a"]),
+        )
+        .unwrap_err();
         assert!(matches!(err, SyncError::MalformedVersionVector));
 
         /// Server whose pull is clean but whose push acknowledgement is hostile.

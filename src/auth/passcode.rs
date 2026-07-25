@@ -71,8 +71,8 @@ impl AuthFactor for PasscodeFactor {
             self.entered.clear();
             return Err(FactorError::Rejected);
         }
-        let parsed = PasswordHash::new(&self.phc_hash)
-            .map_err(|e| FactorError::Backend(e.to_string()))?;
+        let parsed =
+            PasswordHash::new(&self.phc_hash).map_err(|e| FactorError::Backend(e.to_string()))?;
         let result = presence_hasher().verify_password(&self.entered, &parsed);
         // Wipe the entered passcode regardless of outcome.
         self.entered.iter_mut().for_each(|b| *b = 0);

@@ -137,7 +137,10 @@ mod tests {
         // Empty config falls back to the build-time default (None unless the env
         // vars were set at compile time — CI sets them for release builds).
         let empty = SyncConfig::default();
-        assert_eq!(empty.supabase_url(), super::DEFAULT_SUPABASE_URL.filter(|s| !s.is_empty()));
+        assert_eq!(
+            empty.supabase_url(),
+            super::DEFAULT_SUPABASE_URL.filter(|s| !s.is_empty())
+        );
     }
 
     #[test]

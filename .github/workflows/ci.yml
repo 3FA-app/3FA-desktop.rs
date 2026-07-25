@@ -20,7 +20,19 @@ jobs:
       - run: cargo test --no-default-features
   fmt:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - run: cargo fmt --check
+  # src/protocol.rs must stay byte-identical to the backend's copy (the org
+  # invariant guarded by PROTOCOL_VERSION). Fail loudly on any drift.
+  protocol-identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: 3fa-app/3fa-backend.rs
+          path: backend
+          # If the backend repo is private, a PAT with read access is required:
+          # token: ${{ secrets.THREEFA_REPO_TOKEN }}
+      - run: diff -u backend/src/protocol.rs src/protocol.rs
