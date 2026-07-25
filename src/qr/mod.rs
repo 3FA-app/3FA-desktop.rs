@@ -138,9 +138,24 @@ mod tests {
 
     #[test]
     fn rejects_non_otpauth_payload() {
-        assert!(!is_enrollable("https://example.com"));
-        assert!(is_enrollable("otpauth://totp/x?secret=AAAA"));
-        assert!(is_enrollable("otpauth-migration://offline?data=AA"));
+        assert!(!is_recognised("https://example.com"));
+        assert!(is_otpauth("otpauth://totp/x?secret=AAAA"));
+        // Recognised (so we can name it) but not enrollable.
+        assert!(is_recognised("otpauth-migration://offline?data=AA"));
+        assert!(!is_otpauth("otpauth-migration://offline?data=AA"));
+    }
+
+    #[test]
+    fn migration_qr_reports_bulk_export_not_a_parse_failure() {
+        // A Google Authenticator export QR decodes fine, then must be rejected
+        // with an actionable message — nothing in this crate expands it.
+        let uri = "otpauth-migration://offline?data=CjEKCkhlbGxvId6tvu8SGEV4YW1wbGU6YWxpY2VAZ29vZ2xlLmNvbQ";
+        let png = super::test_support::render_qr_png(uri);
+        let err = decode_image_bytes(&png).unwrap_err();
+        assert!(matches!(err, QrError::MigrationUnsupported), "got {err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("Google Authenticator"), "{msg}");
+        assert!(msg.contains("one at a time"), "{msg}");
     }
 
     #[test]
