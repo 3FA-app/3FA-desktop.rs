@@ -165,6 +165,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let auto_submit;
             {
                 let mut s = state.borrow_mut();
+                s.session.note_interaction(Interaction::KeypadInput, Instant::now());
                 if s.entry.len() < 6 {
                     s.entry.push_str(&digit);
                 }
