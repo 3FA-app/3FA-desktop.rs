@@ -231,6 +231,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_scan_camera(move || {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::ScanQr);
             #[cfg(feature = "camera")]
             {
                 // NOTE: blocking grab for up to 12s; a future pass can move this to
