@@ -902,6 +902,14 @@ fn collect_available_factor_proofs() -> Vec<FactorProof> {
 /// manual "Add" field and both QR scan paths so they all run the same validation
 /// and zeroization route (`OtpAccount` wipes its seed on drop).
 fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) {
+    // A Google Authenticator bulk-export URI parses as a URL but not as an
+    // account, and nothing in the crate expands it — say so plainly instead of
+    // letting `from_uri` report "not an otpauth:// URI". (Reached when the user
+    // pastes one; the scan paths reject it before they get here.)
+    if threefa_core::qr::is_migration_uri(uri) {
+        app.set_status(threefa_core::qr::QrError::MigrationUnsupported.to_string().into());
+        return;
+    }
     match OtpAccount::from_uri(uri) {
         Ok(acct) => {
             {
