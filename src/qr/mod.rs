@@ -43,20 +43,43 @@ pub enum QrError {
     Timeout,
 }
 
-/// True if a decoded QR payload is an account we can enroll. We accept the
-/// standard single-account `otpauth://` URI and the Google-Authenticator bulk
-/// export `otpauth-migration://` (expanded by the caller).
-fn is_enrollable(payload: &str) -> bool {
-    payload.starts_with("otpauth://") || payload.starts_with("otpauth-migration://")
+/// True if a decoded QR payload is a single-account `otpauth://` URI — the only
+/// form that can actually be enrolled.
+fn is_otpauth(payload: &str) -> bool {
+    payload.starts_with("otpauth://")
 }
 
-/// Decode the first enrollable QR payload from an already-decoded grayscale image.
+/// True if `payload` is a Google-Authenticator bulk-export URI. Recognised so we
+/// can say so; **not** expanded anywhere in this crate.
+pub fn is_migration_uri(payload: &str) -> bool {
+    payload.starts_with("otpauth-migration://")
+}
+
+/// A payload worth returning from the detector: either enrollable, or a
+/// migration URI we want to report specifically instead of "no QR found".
+fn is_recognised(payload: &str) -> bool {
+    is_otpauth(payload) || is_migration_uri(payload)
+}
+
+/// Turn a recognised payload into an enrollable one, or the most specific error
+/// we can give the user.
+fn accept(payload: String) -> Result<String, QrError> {
+    if is_migration_uri(&payload) {
+        Err(QrError::MigrationUnsupported)
+    } else if is_otpauth(&payload) {
+        Ok(payload)
+    } else {
+        Err(QrError::NotOtpauth)
+    }
+}
+
+/// Decode the first recognised QR payload from an already-decoded grayscale image.
 /// Shared by the image and camera paths.
 fn decode_luma(img: GrayImage) -> Result<String, QrError> {
     let mut prepared = rqrr::PreparedImage::prepare(img);
     for grid in prepared.detect_grids() {
         if let Ok((_meta, content)) = grid.decode() {
-            if is_enrollable(&content) {
+            if is_recognised(&content) {
                 return Ok(content);
             }
         }
@@ -67,11 +90,7 @@ fn decode_luma(img: GrayImage) -> Result<String, QrError> {
 /// Decode an `otpauth://` QR from encoded image bytes (PNG/JPEG/etc.).
 pub fn decode_image_bytes(bytes: &[u8]) -> Result<String, QrError> {
     let img = image::load_from_memory(bytes).map_err(|e| QrError::Image(e.to_string()))?;
-    let payload = decode_luma(img.to_luma8())?;
-    if !is_enrollable(&payload) {
-        return Err(QrError::NotOtpauth);
-    }
-    Ok(payload)
+    accept(decode_luma(img.to_luma8())?)
 }
 
 /// Decode an `otpauth://` QR from an image file on disk.
