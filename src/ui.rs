@@ -849,7 +849,10 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         .collect();
     let model: ModelRc<AccountView> = ModelRc::new(VecModel::from(rows));
     app.set_accounts(model);
-    app.set_session_seconds(s.session.session_seconds_remaining(Instant::now()) as i32);
+    // Show whichever deadline fires first (idle timeout vs. hard cap) — the tick
+    // refreshes this every second, so it follows the idle timer as activity
+    // pushes it out and switches to the cap once the cap is the nearer of the two.
+    app.set_lock_seconds(s.session.lock_seconds_remaining(Instant::now()) as i32);
 }
 
 /// 1 Hz tick: refresh codes/countdowns and drive the auto-lock state machine.
