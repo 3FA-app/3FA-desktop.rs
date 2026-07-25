@@ -416,6 +416,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_supabase_signin(move |server, email, password, passphrase, pin| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             supabase_signin(
                 &app,
                 &state,
