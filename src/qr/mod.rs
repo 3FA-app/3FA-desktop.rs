@@ -123,7 +123,9 @@ pub fn scan_camera(budget: std::time::Duration) -> Result<String, QrError> {
         // `decode_image::<LumaFormat>` yields an ImageBuffer<Luma<u8>, _>.
         if let Ok(payload) = decode_luma(luma) {
             let _ = cam.stop_stream();
-            return Ok(payload);
+            // Same acceptance rules as the image path: a migration QR held up to
+            // the camera reports what it is instead of silently scanning on.
+            return accept(payload);
         }
     }
     let _ = cam.stop_stream();
