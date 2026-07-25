@@ -33,6 +33,8 @@ pub enum SyncError {
     Transport(String),
     #[error("server is ahead; pull and merge before retrying")]
     Conflict(VersionVector),
+    #[error("server returned a malformed version vector")]
+    MalformedVersionVector,
 }
 
 /// Pluggable network transport (real impl wraps `reqwest` + the account's auth
