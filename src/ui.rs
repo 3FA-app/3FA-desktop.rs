@@ -198,6 +198,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_add_account(move |uri| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::AddAccount);
             apply_otpauth_uri(&app, &state, uri.as_str());
         });
     }
