@@ -11,6 +11,14 @@
 //! The decode core only ever yields the *string* payload of the QR; turning that
 //! into an enrolled account is the existing `OtpAccount::from_uri` path, so a
 //! scanned code and a pasted URI share one validation/zeroization route.
+//!
+//! Only the single-account `otpauth://` form can be enrolled. Google
+//! Authenticator's bulk export (`otpauth-migration://`) is *recognised* — so we
+//! can tell the user precisely what they scanned — but not expanded: nothing in
+//! this crate parses its protobuf payload. It is therefore rejected up front
+//! with [`QrError::MigrationUnsupported`] rather than being handed to
+//! `OtpAccount::from_uri`, which would fail with an unhelpful "not an otpauth://
+//! URI".
 
 use image::GrayImage;
 
@@ -22,6 +30,11 @@ pub enum QrError {
     NotFound,
     #[error("QR code did not contain an otpauth:// account")]
     NotOtpauth,
+    #[error(
+        "that's a Google Authenticator bulk-export QR (otpauth-migration://), which 3FA can't \
+         import yet — add accounts one at a time from each service's own QR code"
+    )]
+    MigrationUnsupported,
     #[cfg(feature = "camera")]
     #[error("camera error: {0}")]
     Camera(String),
@@ -30,20 +43,43 @@ pub enum QrError {
     Timeout,
 }
 
-/// True if a decoded QR payload is an account we can enroll. We accept the
-/// standard single-account `otpauth://` URI and the Google-Authenticator bulk
-/// export `otpauth-migration://` (expanded by the caller).
-fn is_enrollable(payload: &str) -> bool {
-    payload.starts_with("otpauth://") || payload.starts_with("otpauth-migration://")
+/// True if a decoded QR payload is a single-account `otpauth://` URI — the only
+/// form that can actually be enrolled.
+fn is_otpauth(payload: &str) -> bool {
+    payload.starts_with("otpauth://")
 }
 
-/// Decode the first enrollable QR payload from an already-decoded grayscale image.
+/// True if `payload` is a Google-Authenticator bulk-export URI. Recognised so we
+/// can say so; **not** expanded anywhere in this crate.
+pub fn is_migration_uri(payload: &str) -> bool {
+    payload.starts_with("otpauth-migration://")
+}
+
+/// A payload worth returning from the detector: either enrollable, or a
+/// migration URI we want to report specifically instead of "no QR found".
+fn is_recognised(payload: &str) -> bool {
+    is_otpauth(payload) || is_migration_uri(payload)
+}
+
+/// Turn a recognised payload into an enrollable one, or the most specific error
+/// we can give the user.
+fn accept(payload: String) -> Result<String, QrError> {
+    if is_migration_uri(&payload) {
+        Err(QrError::MigrationUnsupported)
+    } else if is_otpauth(&payload) {
+        Ok(payload)
+    } else {
+        Err(QrError::NotOtpauth)
+    }
+}
+
+/// Decode the first recognised QR payload from an already-decoded grayscale image.
 /// Shared by the image and camera paths.
 fn decode_luma(img: GrayImage) -> Result<String, QrError> {
     let mut prepared = rqrr::PreparedImage::prepare(img);
     for grid in prepared.detect_grids() {
         if let Ok((_meta, content)) = grid.decode() {
-            if is_enrollable(&content) {
+            if is_recognised(&content) {
                 return Ok(content);
             }
         }
@@ -54,11 +90,7 @@ fn decode_luma(img: GrayImage) -> Result<String, QrError> {
 /// Decode an `otpauth://` QR from encoded image bytes (PNG/JPEG/etc.).
 pub fn decode_image_bytes(bytes: &[u8]) -> Result<String, QrError> {
     let img = image::load_from_memory(bytes).map_err(|e| QrError::Image(e.to_string()))?;
-    let payload = decode_luma(img.to_luma8())?;
-    if !is_enrollable(&payload) {
-        return Err(QrError::NotOtpauth);
-    }
-    Ok(payload)
+    accept(decode_luma(img.to_luma8())?)
 }
 
 /// Decode an `otpauth://` QR from an image file on disk.
@@ -91,7 +123,9 @@ pub fn scan_camera(budget: std::time::Duration) -> Result<String, QrError> {
         // `decode_image::<LumaFormat>` yields an ImageBuffer<Luma<u8>, _>.
         if let Ok(payload) = decode_luma(luma) {
             let _ = cam.stop_stream();
-            return Ok(payload);
+            // Same acceptance rules as the image path: a migration QR held up to
+            // the camera reports what it is instead of silently scanning on.
+            return accept(payload);
         }
     }
     let _ = cam.stop_stream();
@@ -104,9 +138,24 @@ mod tests {
 
     #[test]
     fn rejects_non_otpauth_payload() {
-        assert!(!is_enrollable("https://example.com"));
-        assert!(is_enrollable("otpauth://totp/x?secret=AAAA"));
-        assert!(is_enrollable("otpauth-migration://offline?data=AA"));
+        assert!(!is_recognised("https://example.com"));
+        assert!(is_otpauth("otpauth://totp/x?secret=AAAA"));
+        // Recognised (so we can name it) but not enrollable.
+        assert!(is_recognised("otpauth-migration://offline?data=AA"));
+        assert!(!is_otpauth("otpauth-migration://offline?data=AA"));
+    }
+
+    #[test]
+    fn migration_qr_reports_bulk_export_not_a_parse_failure() {
+        // A Google Authenticator export QR decodes fine, then must be rejected
+        // with an actionable message — nothing in this crate expands it.
+        let uri = "otpauth-migration://offline?data=CjEKCkhlbGxvId6tvu8SGEV4YW1wbGU6YWxpY2VAZ29vZ2xlLmNvbQ";
+        let png = super::test_support::render_qr_png(uri);
+        let err = decode_image_bytes(&png).unwrap_err();
+        assert!(matches!(err, QrError::MigrationUnsupported), "got {err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("Google Authenticator"), "{msg}");
+        assert!(msg.contains("one at a time"), "{msg}");
     }
 
     #[test]
