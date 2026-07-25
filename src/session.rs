@@ -174,6 +174,18 @@ impl Session {
         }
     }
 
+    /// Seconds until the vault actually locks: whichever of the idle timeout and
+    /// the hard cap fires first. This — not either timer alone — is what the
+    /// "locks in {N}s" countdown must show, because [`Session::poll`] locks on
+    /// the *earlier* of the two.
+    pub fn lock_seconds_remaining(&self, now: Instant) -> u64 {
+        if self.state != SessionState::Unlocked {
+            return 0;
+        }
+        self.idle_seconds_remaining(now)
+            .min(self.session_seconds_remaining(now))
+    }
+
     /// Drive the state machine. Locks on idle timeout OR hard cap.
     pub fn poll(&mut self, now: Instant) -> PollResult {
         if self.state == SessionState::Locked {
