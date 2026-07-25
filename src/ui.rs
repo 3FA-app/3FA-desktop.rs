@@ -865,6 +865,9 @@ fn spawn_tick(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         std::time::Duration::from_secs(1),
         move || {
             let Some(app) = weak.upgrade() else { return };
+            // NB: the tick only polls — it never touches the session
+            // (`Interaction::TimerTick` is classified as non-activity), because a
+            // self-touching timer would abolish the idle timeout entirely.
             let poll = state.borrow_mut().session.poll(Instant::now());
             match poll {
                 PollResult::JustLocked => {
