@@ -10,7 +10,8 @@
 
 use crate::crypto::{self, CryptoError};
 use crate::protocol::{
-    KdfParams, PullResponse, PushRequest, PushResponse, SealedBlob, VersionVector,
+    version_vector_is_well_formed, KdfParams, PullResponse, PushRequest, PushResponse, SealedBlob,
+    VersionVector,
 };
 use crate::vault::{VaultData, VaultError};
 use zeroize::Zeroizing;
