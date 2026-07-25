@@ -239,12 +239,11 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 app.set_status("Scanning — hold the QR up to the camera…".into());
                 match threefa_core::qr::scan_camera(std::time::Duration::from_secs(12)) {
                     Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
-                    Err(e) => app.set_status(format!("Camera scan failed: {e}").into()),
+                    Err(e) => app.set_status(e.to_string().into()),
                 }
             }
             #[cfg(not(feature = "camera"))]
             {
-                let _ = &state;
                 app.set_status("Rebuild with `--features camera` to scan from the webcam".into());
             }
         });
