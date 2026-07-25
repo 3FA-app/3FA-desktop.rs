@@ -36,7 +36,10 @@ impl AuthFactor for PasskeyFactor {
     }
 
     fn verify(&mut self, challenge: &Challenge) -> Result<FactorProof, FactorError> {
-        let cred = self.credential_id.as_deref().ok_or(FactorError::Unavailable)?;
+        let cred = self
+            .credential_id
+            .as_deref()
+            .ok_or(FactorError::Unavailable)?;
         let nonce = challenge.nonce.unwrap_or([0u8; 16]);
         native::assert(cred, &nonce).map(|()| FactorProof {
             kind: FactorKind::Passkey,

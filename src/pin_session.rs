@@ -99,7 +99,9 @@ pub fn is_weak(pin: &[u8]) -> bool {
         return true;
     }
     // A small denylist of notoriously common codes.
-    const COMMON: [&[u8]; 6] = [b"123456", b"111111", b"000000", b"121212", b"112233", b"696969"];
+    const COMMON: [&[u8]; 6] = [
+        b"123456", b"111111", b"000000", b"121212", b"112233", b"696969",
+    ];
     COMMON.contains(&pin)
 }
 
@@ -130,9 +132,8 @@ pub fn seal(secrets: &SessionSecrets, pin: &[u8]) -> Result<SealedSession, PinEr
     let salt = crypto::random_salt();
     let key = crypto::derive_key(pin, &salt, kdf_params)?;
 
-    let json = Zeroizing::new(
-        serde_json::to_vec(secrets).map_err(|e| PinError::Serde(e.to_string()))?,
-    );
+    let json =
+        Zeroizing::new(serde_json::to_vec(secrets).map_err(|e| PinError::Serde(e.to_string()))?);
     let sealed = crypto::seal(&key, &json, SESSION_AAD)?;
 
     Ok(SealedSession {
@@ -343,7 +344,10 @@ mod tests {
     #[test]
     fn weak_pins_are_rejected_on_seal() {
         for weak in [b"000000", b"111111", b"123456", b"654321", b"121212"] {
-            assert!(matches!(seal(&secrets(), weak), Err(PinError::Weak)), "{weak:?}");
+            assert!(
+                matches!(seal(&secrets(), weak), Err(PinError::Weak)),
+                "{weak:?}"
+            );
         }
     }
 
@@ -377,7 +381,10 @@ mod tests {
         g.record_failure();
         // Now backoff kicks in and counts down with elapsed time.
         assert_eq!(g.gate(Duration::ZERO), PinGate::Backoff { seconds: 5 });
-        assert_eq!(g.gate(Duration::from_secs(2)), PinGate::Backoff { seconds: 3 });
+        assert_eq!(
+            g.gate(Duration::from_secs(2)),
+            PinGate::Backoff { seconds: 3 }
+        );
         assert_eq!(g.gate(Duration::from_secs(5)), PinGate::Allow);
         // Keep failing to the threshold -> wipe.
         g.record_failure(); // 4

@@ -115,7 +115,10 @@ fn post_creds(
         .send()
         .map_err(err)?;
     if !resp.status().is_success() {
-        return Err(SyncError::Transport(format!("server returned {}", resp.status())));
+        return Err(SyncError::Transport(format!(
+            "server returned {}",
+            resp.status()
+        )));
     }
     resp.json::<TokenResponse>().map_err(err)
 }
@@ -136,12 +139,18 @@ pub fn enroll_supabase(
     }
     let resp = client()?
         .post(join(base_url, "/v1/auth/supabase"))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {access_jwt}"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_jwt}"),
+        )
         .json(&EnrollBody { device_name })
         .send()
         .map_err(err)?;
     if !resp.status().is_success() {
-        return Err(SyncError::Transport(format!("server returned {}", resp.status())));
+        return Err(SyncError::Transport(format!(
+            "server returned {}",
+            resp.status()
+        )));
     }
     resp.json::<TokenResponse>().map_err(err)
 }
@@ -179,7 +188,10 @@ impl Transport for HttpTransport {
             .send()
             .map_err(err)?;
         if !resp.status().is_success() {
-            return Err(SyncError::Transport(format!("push failed: {}", resp.status())));
+            return Err(SyncError::Transport(format!(
+                "push failed: {}",
+                resp.status()
+            )));
         }
         resp.json::<PushResponse>().map_err(err)
     }
@@ -192,7 +204,10 @@ impl Transport for HttpTransport {
             .send()
             .map_err(err)?;
         if !resp.status().is_success() {
-            return Err(SyncError::Transport(format!("pull failed: {}", resp.status())));
+            return Err(SyncError::Transport(format!(
+                "pull failed: {}",
+                resp.status()
+            )));
         }
         resp.json::<PullResponse>().map_err(err)
     }
@@ -235,8 +250,14 @@ mod tests {
 
     #[test]
     fn join_trims_trailing_slash() {
-        assert_eq!(join("https://x.test/", "/v1/vault"), "https://x.test/v1/vault");
-        assert_eq!(join("https://x.test", "/v1/vault"), "https://x.test/v1/vault");
+        assert_eq!(
+            join("https://x.test/", "/v1/vault"),
+            "https://x.test/v1/vault"
+        );
+        assert_eq!(
+            join("https://x.test", "/v1/vault"),
+            "https://x.test/v1/vault"
+        );
     }
 
     #[test]

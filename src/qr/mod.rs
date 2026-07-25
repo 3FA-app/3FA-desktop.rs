@@ -79,7 +79,8 @@ pub fn scan_camera(budget: std::time::Duration) -> Result<String, QrError> {
     let format = RequestedFormat::new::<LumaFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut cam =
         Camera::new(CameraIndex::Index(0), format).map_err(|e| QrError::Camera(e.to_string()))?;
-    cam.open_stream().map_err(|e| QrError::Camera(e.to_string()))?;
+    cam.open_stream()
+        .map_err(|e| QrError::Camera(e.to_string()))?;
 
     let deadline = std::time::Instant::now() + budget;
     while std::time::Instant::now() < deadline {

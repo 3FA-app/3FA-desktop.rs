@@ -9,7 +9,7 @@ use zeroize::ZeroizeOnDrop;
 
 /// One enrolled OTP account. The `secret` is the raw decoded key bytes and is
 /// zeroized on drop so it never lingers in freed memory.
-#[derive(Debug, Clone, PartialEq, Eq, ZeroizeOnDrop)]
+#[derive(Clone, PartialEq, Eq, ZeroizeOnDrop)]
 pub struct OtpAccount {
     #[zeroize(skip)]
     pub kind: OtpKind,
@@ -27,6 +27,22 @@ pub struct OtpAccount {
     pub period: u64,
     #[zeroize(skip)]
     pub counter: u64,
+}
+
+// Never let the raw OTP seed leak through a derived `Debug`.
+impl std::fmt::Debug for OtpAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OtpAccount")
+            .field("kind", &self.kind)
+            .field("issuer", &self.issuer)
+            .field("label", &self.label)
+            .field("secret", &"<redacted>")
+            .field("algorithm", &self.algorithm)
+            .field("digits", &self.digits)
+            .field("period", &self.period)
+            .field("counter", &self.counter)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

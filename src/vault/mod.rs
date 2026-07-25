@@ -48,7 +48,7 @@ impl Default for FactorPolicy {
 /// Like [`OtpAccount`], the decrypted form wipes its `secret` on drop so raw OTP
 /// seeds don't linger in freed heap after the vault re-locks. Non-secret fields
 /// are `#[zeroize(skip)]` (the enums also don't implement `Zeroize`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct StoredAccount {
     #[zeroize(skip)]
     pub id: String,
@@ -69,6 +69,23 @@ pub struct StoredAccount {
     pub period: u64,
     #[zeroize(skip)]
     pub counter: u64,
+}
+
+// Never let the raw OTP seed leak through a derived `Debug`.
+impl std::fmt::Debug for StoredAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredAccount")
+            .field("id", &self.id)
+            .field("issuer", &self.issuer)
+            .field("label", &self.label)
+            .field("secret", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("algorithm", &self.algorithm)
+            .field("digits", &self.digits)
+            .field("period", &self.period)
+            .field("counter", &self.counter)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,7 +155,7 @@ impl StoredAccount {
 /// The decrypted vault contents held in memory while unlocked. Wipes its
 /// secret-bearing fields on drop (each account's seed, the voiceprint, and the
 /// voice-PIN hash) so they don't outlive a re-lock in freed memory.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Default, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct VaultData {
     pub accounts: Vec<StoredAccount>,
     #[zeroize(skip)]
@@ -149,6 +166,25 @@ pub struct VaultData {
     /// Argon2id hash of the spoken 4-digit PIN (knowledge half of the voice
     /// factor). Stored as an encoded PHC string.
     pub voice_pin_hash: Option<String>,
+}
+
+// Never let the voiceprint embedding or voice-PIN hash leak through a derived
+// `Debug` (accounts print via `StoredAccount`'s redacting impl).
+impl std::fmt::Debug for VaultData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultData")
+            .field("accounts", &self.accounts)
+            .field("policy", &self.policy)
+            .field(
+                "voiceprint",
+                &self.voiceprint.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "voice_pin_hash",
+                &self.voice_pin_hash.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// The sealed on-disk file.

@@ -10,7 +10,8 @@
 
 use crate::crypto::{self, CryptoError};
 use crate::protocol::{
-    KdfParams, PullResponse, PushRequest, PushResponse, SealedBlob, VersionVector,
+    version_vector_is_well_formed, KdfParams, PullResponse, PushRequest, PushResponse, SealedBlob,
+    VersionVector,
 };
 use crate::vault::{VaultData, VaultError};
 use zeroize::Zeroizing;
@@ -32,6 +33,8 @@ pub enum SyncError {
     Transport(String),
     #[error("server is ahead; pull and merge before retrying")]
     Conflict(VersionVector),
+    #[error("server returned a malformed version vector")]
+    MalformedVersionVector,
 }
 
 /// Pluggable network transport (real impl wraps `reqwest` + the account's auth
@@ -123,6 +126,12 @@ pub fn synchronize<T: Transport>(
     let mut working = local.clone();
     for _ in 0..SYNC_MAX_ATTEMPTS {
         let pulled = transport.pull()?;
+        // The version vector came from the (untrusted) network: reject duplicate
+        // ids, zero counters, bad device ids, or an oversized vector before we
+        // echo it back as `base_version` or store it as authoritative.
+        if !version_vector_is_well_formed(&pulled.version) {
+            return Err(SyncError::MalformedVersionVector);
+        }
         let merged = match &pulled.blob {
             Some(blob) => {
                 let remote = open_downloaded(blob, account_password)?;
@@ -138,7 +147,17 @@ pub fn synchronize<T: Transport>(
             base_version: pulled.version.clone(),
         };
         match transport.push(&req)? {
-            PushResponse::Ok { version } => return Ok((merged, version)),
+            PushResponse::Ok { version } => {
+                if !version_vector_is_well_formed(&version) {
+                    return Err(SyncError::MalformedVersionVector);
+                }
+                return Ok((merged, version));
+            }
+            PushResponse::Conflict { server_version }
+                if !version_vector_is_well_formed(&server_version) =>
+            {
+                return Err(SyncError::MalformedVersionVector);
+            }
             PushResponse::Conflict { .. } => {
                 // Server advanced under us; fold what we just merged back into the
                 // working set and try again from a fresh pull.
@@ -438,5 +457,63 @@ mod tests {
         let stored = server.stored.clone().unwrap();
         let back = open_downloaded(&stored, &server.password).unwrap();
         assert_eq!(back.accounts.len(), 2);
+    }
+
+    /// A malicious server cannot feed this client a malformed version vector
+    /// (duplicate ids, zero counters, bad device ids): `synchronize` rejects it
+    /// before echoing it back as `base_version` or treating it as authoritative.
+    #[test]
+    fn synchronize_rejects_malformed_server_version_vector() {
+        use crate::protocol::VersionEntry;
+
+        /// Hostile server double: every pull carries a duplicate-id vector.
+        struct HostileServer;
+        impl Transport for HostileServer {
+            fn push(&mut self, _req: &PushRequest) -> Result<PushResponse, SyncError> {
+                panic!("push must not be reached with a malformed pulled version");
+            }
+            fn pull(&mut self) -> Result<PullResponse, SyncError> {
+                let dup = VersionEntry {
+                    device_id: "dev-a".into(),
+                    counter: 1,
+                };
+                Ok(PullResponse {
+                    blob: None,
+                    version: vec![dup.clone(), dup],
+                })
+            }
+        }
+
+        let err = synchronize(
+            &mut HostileServer,
+            b"pw",
+            "devA",
+            &vault_with(&["GitHub:a"]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SyncError::MalformedVersionVector));
+
+        /// Server whose pull is clean but whose push acknowledgement is hostile.
+        struct HostileAck;
+        impl Transport for HostileAck {
+            fn push(&mut self, _req: &PushRequest) -> Result<PushResponse, SyncError> {
+                Ok(PushResponse::Ok {
+                    version: vec![VersionEntry {
+                        device_id: "bad id".into(),
+                        counter: 1,
+                    }],
+                })
+            }
+            fn pull(&mut self) -> Result<PullResponse, SyncError> {
+                Ok(PullResponse {
+                    blob: None,
+                    version: Vec::new(),
+                })
+            }
+        }
+
+        let err =
+            synchronize(&mut HostileAck, b"pw", "devA", &vault_with(&["GitHub:a"])).unwrap_err();
+        assert!(matches!(err, SyncError::MalformedVersionVector));
     }
 }
