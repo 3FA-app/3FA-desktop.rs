@@ -16,8 +16,9 @@ sealed behind multi-factor security. Written in Rust with a pure-native
 ## Security model
 
 - **Encrypted vault** — seeds encrypted with XChaCha20-Poly1305 under an
-  Argon2id key from your passcode, sealed to the Secure Enclave / TPM. Keys are
-  zeroized on lock.
+  Argon2id key from your passcode. Keys are zeroized on lock. (The extra
+  Secure-Enclave / TPM wrap of the DEK is designed for but not implemented — it
+  depends on the biometric backend below.)
 - **Multi-factor policy engine** — counts *distinct* factor kinds (passcode,
   biometric, platform passkey, voice) against a per-vault [`FactorPolicy`].
   **Today only the passcode factor is actually wired into the app**: the vault
