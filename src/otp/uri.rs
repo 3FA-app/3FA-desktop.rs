@@ -29,6 +29,22 @@ pub struct OtpAccount {
     pub counter: u64,
 }
 
+// Never let the raw OTP seed leak through a derived `Debug`.
+impl std::fmt::Debug for OtpAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OtpAccount")
+            .field("kind", &self.kind)
+            .field("issuer", &self.issuer)
+            .field("label", &self.label)
+            .field("secret", &"<redacted>")
+            .field("algorithm", &self.algorithm)
+            .field("digits", &self.digits)
+            .field("period", &self.period)
+            .field("counter", &self.counter)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtpKind {
     Totp,
