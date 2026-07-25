@@ -20,7 +20,7 @@ use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
 use threefa_core::pin_session::{self, PinGate, PinGuard, SealedSessionFile, SessionSecrets};
-use threefa_core::session::{PollResult, Session};
+use threefa_core::session::{Interaction, PollResult, Session};
 use threefa_core::sync::http;
 use threefa_core::sync::supabase::{self, SupabaseConfig};
 use threefa_core::vault::{StoredAccount, VaultData, VaultFile};
