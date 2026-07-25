@@ -11,6 +11,14 @@
 //! The decode core only ever yields the *string* payload of the QR; turning that
 //! into an enrolled account is the existing `OtpAccount::from_uri` path, so a
 //! scanned code and a pasted URI share one validation/zeroization route.
+//!
+//! Only the single-account `otpauth://` form can be enrolled. Google
+//! Authenticator's bulk export (`otpauth-migration://`) is *recognised* — so we
+//! can tell the user precisely what they scanned — but not expanded: nothing in
+//! this crate parses its protobuf payload. It is therefore rejected up front
+//! with [`QrError::MigrationUnsupported`] rather than being handed to
+//! `OtpAccount::from_uri`, which would fail with an unhelpful "not an otpauth://
+//! URI".
 
 use image::GrayImage;
 
