@@ -274,6 +274,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_lock_now(move || {
             let Some(app) = weak.upgrade() else { return };
+            // Classified as non-activity: there is no idle timer left to reset.
+            note_activity(&state, Interaction::LockNow);
             state.borrow_mut().lock();
             app.set_screen("lock".into());
             app.set_entered_length(0);
