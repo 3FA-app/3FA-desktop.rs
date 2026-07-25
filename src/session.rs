@@ -135,6 +135,17 @@ impl Session {
         }
     }
 
+    /// Report a GUI interaction. Resets the idle timer iff the interaction is
+    /// [user activity](Interaction::is_user_activity) and the vault is unlocked.
+    /// Returns whether the idle timer was actually reset.
+    pub fn note_interaction(&mut self, interaction: Interaction, now: Instant) -> bool {
+        if !interaction.is_user_activity() || self.state != SessionState::Unlocked {
+            return false;
+        }
+        self.touch(now);
+        true
+    }
+
     /// Force a lock and clear timers. The caller is responsible for zeroizing the
     /// in-memory DEK/vault.
     pub fn lock(&mut self) {
