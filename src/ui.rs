@@ -217,7 +217,10 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let Some(path) = picked else { return };
             match threefa_core::qr::decode_image_path(&path) {
                 Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
-                Err(e) => app.set_status(format!("No otpauth QR found: {e}").into()),
+                // `QrError`'s messages are self-contained (and name the bulk-export
+                // case specifically), so show them as-is rather than under a
+                // "no otpauth QR found" prefix that would be wrong for most of them.
+                Err(e) => app.set_status(e.to_string().into()),
             }
         });
     }
