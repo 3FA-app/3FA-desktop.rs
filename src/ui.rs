@@ -255,6 +255,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_copy_code(move |id| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::CopyCode);
             let s = state.borrow();
             if let Some(data) = s.data.as_ref() {
                 if let Some(acct) = data.accounts.iter().find(|a| a.id == id.as_str()) {
