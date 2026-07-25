@@ -30,6 +30,11 @@ pub enum QrError {
     NotFound,
     #[error("QR code did not contain an otpauth:// account")]
     NotOtpauth,
+    #[error(
+        "that's a Google Authenticator bulk-export QR (otpauth-migration://), which 3FA can't \
+         import yet — add accounts one at a time from each service's own QR code"
+    )]
+    MigrationUnsupported,
     #[cfg(feature = "camera")]
     #[error("camera error: {0}")]
     Camera(String),
