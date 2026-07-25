@@ -64,6 +64,20 @@ impl AppState {
     }
 }
 
+/// Report a GUI interaction to the session's idle timer.
+///
+/// Every Slint callback that represents the user *doing something* funnels
+/// through here; whether a given [`Interaction`] actually resets the timer is
+/// decided by [`Interaction::is_user_activity`] in the library (unit-tested
+/// there — this module is GUI-only and is not compiled by CI). Takes the borrow
+/// for the shortest possible moment so it can be called next to other borrows.
+fn note_activity(state: &Rc<RefCell<AppState>>, interaction: Interaction) {
+    state
+        .borrow_mut()
+        .session
+        .note_interaction(interaction, Instant::now());
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
