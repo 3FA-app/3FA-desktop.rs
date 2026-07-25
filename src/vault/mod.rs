@@ -168,6 +168,25 @@ pub struct VaultData {
     pub voice_pin_hash: Option<String>,
 }
 
+// Never let the voiceprint embedding or voice-PIN hash leak through a derived
+// `Debug` (accounts print via `StoredAccount`'s redacting impl).
+impl std::fmt::Debug for VaultData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultData")
+            .field("accounts", &self.accounts)
+            .field("policy", &self.policy)
+            .field(
+                "voiceprint",
+                &self.voiceprint.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "voice_pin_hash",
+                &self.voice_pin_hash.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
 /// The sealed on-disk file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultFile {
