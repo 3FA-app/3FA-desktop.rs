@@ -1,7 +1,8 @@
 # 3FA — Desktop Authenticator (frontend)
 
 The native desktop app: generates standard TOTP/HOTP codes and keeps the seeds
-sealed behind multi-factor security. Written in Rust with a pure-native
+in an encrypted vault behind a 6-digit passcode and an idle auto-lock. Written in
+Rust with a pure-native
 [Slint](https://slint.dev) UI — no Electron, no webview.
 
 > One of three repos:
