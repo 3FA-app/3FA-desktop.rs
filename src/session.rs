@@ -41,6 +41,55 @@ pub enum PollResult {
     Locked,
 }
 
+/// Something the user (or the app's own timer) did, as reported by the GUI.
+///
+/// Only some of these are *user activity* for the purposes of the idle timer —
+/// see [`Interaction::is_user_activity`]. Keeping the list explicit (rather than
+/// sprinkling bare `touch` calls through the Slint callbacks) means the decision
+/// is reviewable and testable in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interaction {
+    /// A digit or backspace on the passcode pad.
+    KeypadInput,
+    /// Enrolling an account from a pasted/typed `otpauth://` URI.
+    AddAccount,
+    /// Starting a QR scan (image import or webcam).
+    ScanQr,
+    /// Revealing / copying a code to the clipboard.
+    CopyCode,
+    /// Moving between screens (vault ⇄ settings).
+    Navigate,
+    /// A sync, sign-in or PIN-unlock action from the settings screen.
+    Sync,
+    /// The 1 Hz refresh tick. **Not** activity: an app that touches itself has
+    /// no idle timeout at all, only the hard cap.
+    TimerTick,
+    /// Pressing "Keep open (+factor)". **Not** activity: extending is gated on a
+    /// second, distinct factor ([`Gate::Extend`]); letting the mere button press
+    /// reset the idle timer would silently route around that gate.
+    ExtendRequest,
+    /// Pressing "Lock now". **Not** activity: it locks the vault, and touching a
+    /// session on its way down is meaningless.
+    LockNow,
+}
+
+impl Interaction {
+    /// Whether this interaction is genuine user activity that should reset the
+    /// idle timer. Never resets the 5-minute hard cap — that is deliberate, and
+    /// is the reason both timers exist.
+    pub fn is_user_activity(self) -> bool {
+        match self {
+            Interaction::KeypadInput
+            | Interaction::AddAccount
+            | Interaction::ScanQr
+            | Interaction::CopyCode
+            | Interaction::Navigate
+            | Interaction::Sync => true,
+            Interaction::TimerTick | Interaction::ExtendRequest | Interaction::LockNow => false,
+        }
+    }
+}
+
 pub struct Session {
     state: SessionState,
     /// When the current unlocked session began (for the 5-minute hard cap).
