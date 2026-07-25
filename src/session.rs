@@ -8,8 +8,12 @@
 //!   * After the 5-minute hard cap the vault re-locks no matter what.
 //!
 //! Time is injected (`now: Instant`) so the logic is unit-testable without real
-//! sleeps. The GUI calls [`Session::poll`] on a timer and on every user action
-//! calls [`Session::touch`].
+//! sleeps. The GUI calls [`Session::poll`] on a timer and reports every user
+//! interaction to [`Session::note_interaction`], which resets the idle timer for
+//! the interactions [`Interaction::is_user_activity`] classifies as real
+//! activity. That classification lives here, in the library, so it is unit-
+//! testable without a display server (`src/ui.rs` is GUI-only and never compiled
+//! by CI's headless build).
 
 use crate::auth::{FactorProof, Gate, PolicyEngine};
 use std::time::{Duration, Instant};
