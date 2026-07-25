@@ -102,8 +102,12 @@ build-time defaults):
 
 The Settings screen then offers **Sign in** (email/password → device enrollment,
 optionally sealing a 6-digit PIN session), **Unlock with PIN** (refresh the
-session without re-entering the password), and **Sync now**. The legacy
-username/password controls remain for accounts not yet migrated to Supabase.
+session without re-entering the password), and **Sync now**.
+
+The legacy **Log in** / **Register** controls below them are **non-functional**:
+they call `/v1/register` and `/v1/login`, which the backend has retired and no
+longer mounts (it asserts they return 404 — see `3fa-backend.rs/src/app.rs`).
+They are pending removal; use the Supabase sign-in above.
 
 ## Releasing
 
