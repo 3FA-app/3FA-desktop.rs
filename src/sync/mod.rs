@@ -147,7 +147,17 @@ pub fn synchronize<T: Transport>(
             base_version: pulled.version.clone(),
         };
         match transport.push(&req)? {
-            PushResponse::Ok { version } => return Ok((merged, version)),
+            PushResponse::Ok { version } => {
+                if !version_vector_is_well_formed(&version) {
+                    return Err(SyncError::MalformedVersionVector);
+                }
+                return Ok((merged, version));
+            }
+            PushResponse::Conflict { server_version }
+                if !version_vector_is_well_formed(&server_version) =>
+            {
+                return Err(SyncError::MalformedVersionVector);
+            }
             PushResponse::Conflict { .. } => {
                 // Server advanced under us; fold what we just merged back into the
                 // working set and try again from a fresh pull.
