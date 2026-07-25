@@ -185,6 +185,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_key_backspace(move || {
             let Some(app) = weak.upgrade() else { return };
             let mut s = state.borrow_mut();
+            s.session
+                .note_interaction(Interaction::KeypadInput, Instant::now());
             s.entry.pop();
             app.set_entered_length(s.entry.len() as i32);
         });
