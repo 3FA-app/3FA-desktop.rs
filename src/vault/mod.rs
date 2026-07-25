@@ -71,6 +71,23 @@ pub struct StoredAccount {
     pub counter: u64,
 }
 
+// Never let the raw OTP seed leak through a derived `Debug`.
+impl std::fmt::Debug for StoredAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredAccount")
+            .field("id", &self.id)
+            .field("issuer", &self.issuer)
+            .field("label", &self.label)
+            .field("secret", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("algorithm", &self.algorithm)
+            .field("digits", &self.digits)
+            .field("period", &self.period)
+            .field("counter", &self.counter)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StoredKind {
     Totp,
