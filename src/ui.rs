@@ -334,9 +334,11 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
     // --- open / close the sync+settings screen ---
     {
+        let state = state.clone();
         let weak = weak.clone();
         app.on_open_settings(move || {
             if let Some(app) = weak.upgrade() {
+                note_activity(&state, Interaction::Navigate);
                 app.set_screen("settings".into());
                 app.set_sync_status("".into());
             }
@@ -347,6 +349,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_close_settings(move || {
             if let Some(app) = weak.upgrade() {
+                note_activity(&state, Interaction::Navigate);
                 let unlocked = state.borrow().data.is_some();
                 app.set_screen(if unlocked {
                     "vault".into()
