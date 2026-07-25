@@ -155,7 +155,7 @@ impl StoredAccount {
 /// The decrypted vault contents held in memory while unlocked. Wipes its
 /// secret-bearing fields on drop (each account's seed, the voiceprint, and the
 /// voice-PIN hash) so they don't outlive a re-lock in freed memory.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Default, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct VaultData {
     pub accounts: Vec<StoredAccount>,
     #[zeroize(skip)]
