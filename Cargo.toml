@@ -62,7 +62,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 slint = { version = "1.8", optional = true }
 arboard = { version = "3", optional = true }
 # Native file picker for "Scan image" (GUI only).
-rfd = { version = "0.15", optional = true }
+rfd = { version = "0.17", optional = true }
 
 # Live webcam capture for QR scanning (optional; see the `camera` feature).
 nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
