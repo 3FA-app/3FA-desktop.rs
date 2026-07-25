@@ -48,7 +48,7 @@ impl Default for FactorPolicy {
 /// Like [`OtpAccount`], the decrypted form wipes its `secret` on drop so raw OTP
 /// seeds don't linger in freed heap after the vault re-locks. Non-secret fields
 /// are `#[zeroize(skip)]` (the enums also don't implement `Zeroize`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct StoredAccount {
     #[zeroize(skip)]
     pub id: String,
