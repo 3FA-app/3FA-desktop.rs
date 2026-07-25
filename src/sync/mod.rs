@@ -126,6 +126,12 @@ pub fn synchronize<T: Transport>(
     let mut working = local.clone();
     for _ in 0..SYNC_MAX_ATTEMPTS {
         let pulled = transport.pull()?;
+        // The version vector came from the (untrusted) network: reject duplicate
+        // ids, zero counters, bad device ids, or an oversized vector before we
+        // echo it back as `base_version` or store it as authoritative.
+        if !version_vector_is_well_formed(&pulled.version) {
+            return Err(SyncError::MalformedVersionVector);
+        }
         let merged = match &pulled.blob {
             Some(blob) => {
                 let remote = open_downloaded(blob, account_password)?;
