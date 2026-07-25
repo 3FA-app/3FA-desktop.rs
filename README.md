@@ -18,16 +18,31 @@ sealed behind multi-factor security. Written in Rust with a pure-native
 - **Encrypted vault** — seeds encrypted with XChaCha20-Poly1305 under an
   Argon2id key from your passcode, sealed to the Secure Enclave / TPM. Keys are
   zeroized on lock.
-- **Multi-factor (2FA/3FA)** — a policy engine counting *distinct* factor kinds:
-  passcode, biometric (Touch ID / Windows Hello / fprintd), platform passkey,
-  and voice.
-- **Auto-lock** — 90 s idle; extending up to 5 min requires a second, distinct
-  factor.
-- **Voice factor** — speak a 4-digit PIN; verifies *what* was said (on-device
-  STT) and *who* said it (on-device voiceprint). Optional challenge mode defeats
-  replay. Audio never leaves the device.
-- **Supabase login (zero-knowledge).** Sign in with Supabase (email/password or
-  OAuth); the app never sends the password to *our* sync server — it presents the
+- **Multi-factor policy engine** — counts *distinct* factor kinds (passcode,
+  biometric, platform passkey, voice) against a per-vault [`FactorPolicy`].
+  **Today only the passcode factor is actually wired into the app**: the vault
+  unlocks on the 6-digit passcode, and the default policy requires one factor
+  ([`src/vault/mod.rs`](src/vault/mod.rs)). The biometric and passkey backends
+  are unimplemented seams that report "unavailable"
+  ([`src/auth/biometric/`](src/auth), [`src/auth/passkey.rs`](src/auth/passkey.rs)),
+  the voice factor ships only with its `NullBackend`, and the GUI hides all three
+  factor buttons ([`src/ui.rs`](src/ui.rs)). Multi-factor *unlock* is therefore
+  not a shipped capability — see the roadmap below.
+- **Auto-lock** — 90 s idle (reset by user activity: keypad, adding an account,
+  scanning, copying a code, navigating, syncing) with a 5-minute hard cap that
+  fires regardless of activity. The vault screen counts down to whichever fires
+  first. The "Keep open (+factor)" button asks the policy engine for a second,
+  *distinct* factor to reset the idle timer — which, until a second factor
+  backend exists (above), nothing can currently satisfy.
+- **Voice factor (verification logic only)** — speak a 4-digit PIN; verifies
+  *what* was said (on-device STT) and *who* said it (on-device voiceprint).
+  Optional challenge mode defeats replay. Audio never leaves the device. The
+  comparison logic and its tests exist; the STT/speaker backend does not, so the
+  factor is inert in shipped builds.
+- **Supabase login (zero-knowledge).** Sign in with Supabase using
+  **email + password** (`grant_type=password`, plus `refresh_token` for silent
+  renewal — no OAuth/social provider flow is implemented); the app never sends
+  the password to *our* sync server — it presents the
   Supabase access JWT to `/v1/auth/supabase` and gets a per-device sync token in
   return. Login is fully separate from the vault's E2E key. See
   [`src/sync/supabase.rs`](src/sync/supabase.rs).

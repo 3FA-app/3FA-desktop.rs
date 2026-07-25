@@ -165,7 +165,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let auto_submit;
             {
                 let mut s = state.borrow_mut();
-                s.session.note_interaction(Interaction::KeypadInput, Instant::now());
+                s.session
+                    .note_interaction(Interaction::KeypadInput, Instant::now());
                 if s.entry.len() < 6 {
                     s.entry.push_str(&digit);
                 }
@@ -907,7 +908,11 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
     // letting `from_uri` report "not an otpauth:// URI". (Reached when the user
     // pastes one; the scan paths reject it before they get here.)
     if threefa_core::qr::is_migration_uri(uri) {
-        app.set_status(threefa_core::qr::QrError::MigrationUnsupported.to_string().into());
+        app.set_status(
+            threefa_core::qr::QrError::MigrationUnsupported
+                .to_string()
+                .into(),
+        );
         return;
     }
     match OtpAccount::from_uri(uri) {

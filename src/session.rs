@@ -317,10 +317,7 @@ mod tests {
             Interaction::ExtendRequest,
             Interaction::LockNow,
         ] {
-            assert!(
-                !i.is_user_activity(),
-                "{i:?} must NOT reset the idle timer"
-            );
+            assert!(!i.is_user_activity(), "{i:?} must NOT reset the idle timer");
         }
     }
 
@@ -339,7 +336,10 @@ mod tests {
         for n in 1..=9 {
             assert!(!s.note_interaction(Interaction::TimerTick, t0 + Duration::from_secs(80 + n)));
         }
-        assert_eq!(s.poll(t0 + Duration::from_secs(170)), PollResult::JustLocked);
+        assert_eq!(
+            s.poll(t0 + Duration::from_secs(170)),
+            PollResult::JustLocked
+        );
     }
 
     #[test]
