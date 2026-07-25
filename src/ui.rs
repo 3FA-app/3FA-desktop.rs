@@ -289,6 +289,10 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_extend_session(move || {
             let Some(app) = weak.upgrade() else { return };
+            // Deliberately classified as NON-activity: pressing this button must
+            // not reset the idle timer as a side effect, or it would extend the
+            // session without ever satisfying the second-factor gate below.
+            note_activity(&state, Interaction::ExtendRequest);
             let mut s = state.borrow_mut();
             let engine = s.policy_engine();
             // With native factors stubbed, the only available extra factor today
