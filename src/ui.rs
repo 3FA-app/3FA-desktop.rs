@@ -209,6 +209,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_scan_image(move || {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::ScanQr);
             let picked = rfd::FileDialog::new()
                 .add_filter("QR image", &["png", "jpg", "jpeg", "webp", "bmp"])
                 .set_title("Choose a QR code image")
