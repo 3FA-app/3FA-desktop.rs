@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       INTERFACES_COMMIT: ef75da711138dfb96e4fe18a87f8d82efe997c0d
-      GENERATED_EXPORT_URL: 'https://sdmntprnorthcentralus.oaiusercontent.com/files/00000000-dc74-822f-8867-4ea74ff6395a/raw?se=2026-07-27T21:16:35Z&sp=r&sv=2026-02-06&sr=b&scid=8618c47a-0d5b-5d1d-9f67-c33255eb6e4d&skoid=de71a0d5-fb02-4fce-be69-9296aced242b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-07-27T19:14:48Z&ske=2026-07-29T19:14:48Z&sks=b&skv=2026-02-06&sig=%2B%2B5Edqc1Ohem17SgH4xJEOEyhGYTsvs6FvXUqvkQG1A%3D'
+      GENERATED_EXPORT_URL: 'https://sdmntprsoutheastus3.oaiusercontent.com/files/00000000-56a4-820c-b80c-e8a4f6f37919/raw?se=2026-07-27T21:27:20Z&sp=r&sv=2026-02-06&sr=b&scid=8b48e7c6-7a28-52ac-9ca8-a6230d7854cf&skoid=de71a0d5-fb02-4fce-be69-9296aced242b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-07-27T19:23:50Z&ske=2026-07-29T19:23:50Z&sks=b&skv=2026-02-06&sig=vrrDaUxWIQj6OUsOkNDZRV99YhQDoifbsx0QtPf7bsA%3D'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,194 +31,8 @@ jobs:
           unzip -q "$RUNNER_TEMP/export/generated-interfaces.zip" -d "$RUNNER_TEMP/generated"
           test "$(cat "$RUNNER_TEMP/export/generated-source-commit.txt")" = "$INTERFACES_COMMIT"
 
-      - name: Vendor canonical Rust interfaces and compose parity layer
-        shell: python
-        run: |
-          import os
-          import pathlib
-          import shutil
-          import subprocess
-
-          root = pathlib.Path('.')
-          generated = pathlib.Path(os.environ['RUNNER_TEMP']) / 'generated' / 'generated' / 'rust'
-          vendor = root / 'vendor' / 'threefa-interfaces'
-          (vendor / 'src').mkdir(parents=True, exist_ok=True)
-          shutil.copy2(generated / 'Cargo.toml', vendor / 'Cargo.toml')
-          shutil.copy2(generated / 'src' / 'lib.rs', vendor / 'src' / 'lib.rs')
-
-          cargo = (root / 'Cargo.toml').read_text()
-          dependency = 'threefa-interfaces = { path = "vendor/threefa-interfaces" }\n'
-          if dependency not in cargo:
-              cargo = cargo.replace('[dependencies]\n', '[dependencies]\n' + dependency, 1)
-          (root / 'Cargo.toml').write_text(cargo)
-
-          protocol_path = root / 'src' / 'protocol.rs'
-          protocol = protocol_path.read_text()
-          old = '''//! ⚠️ DUPLICATED across the frontend (`3fa-desktop.rs`) and backend\n//! (`3fa-backend.rs`) repos by design — they are separate repos with no shared\n//! crate. Keep the two copies byte-for-byte in sync; any divergence MUST bump\n//! [`PROTOCOL_VERSION`] so a mismatch is detected at the boundary rather than\n//! silently corrupting a sync.\n'''
-          new = '''//! Legacy vault-sync DTOs remain local adapters while they carry desktop-only\n//! validation methods. Their wire shape is checked against the vendored canonical\n//! `threefa-interfaces` crate on every CI run. New Signal/device/recovery types are\n//! re-exported directly from that immutable generated package rather than copied.\n'''
-          protocol = protocol.replace(old, new)
-          exports = '''\npub use threefa_interfaces::{\n    AccountDeviceSummary, DeviceEnrollmentRequest, DeviceRevocationRequest,\n    EncryptedRecoveryPackage, LocalUnlockPolicy, PinKdfPolicy, RecoveryChallenge,\n    RecoveryChannelSummary, SignalCiphertextEnvelope, SignalDevicePreKeyBundle,\n    SignalDeviceRevisionResponse, SignalEnvelopeMetadata, SignalMailboxAckItem,\n    SignalMailboxAckRequest, SignalMailboxAckResponse, SignalMailboxItem,\n    SignalMailboxPullResponse, SignalOneTimePreKey, SignalPreKeyBundleResponse,\n    SignalPublishPreKeysRequest, SignalPublishPreKeysResponse,\n    SignalQueueEnvelopeRequest, SignalQueueEnvelopeResponse,\n    UpsertRecoveryChannelRequest, VerifyRecoveryChallengeRequest,\n};\n'''
-          anchor = 'use std::collections::HashSet;\n'
-          if exports.strip() not in protocol:
-              protocol = protocol.replace(anchor, anchor + exports, 1)
-          protocol_path.write_text(protocol)
-
-          readme_path = root / 'README.md'
-          readme = readme_path.read_text()
-          readme = readme.replace(
-              '> The sync wire-protocol types live in [`src/protocol.rs`](src/protocol.rs), a\n> copy kept byte-for-byte in sync with the backend\'s copy (guarded by\n> `PROTOCOL_VERSION`).',
-              '> Canonical sync, Signal, device, and recovery wire types are vendored from\n> `3fa-interfaces` at an immutable commit with exact Git-blob provenance. Legacy\n> desktop vault-sync adapters in `src/protocol.rs` are JSON-parity tested against it.',
-          )
-          readme = readme.replace(
-              'src/protocol.rs  Wire-protocol DTOs (duplicated with the backend)',
-              'src/protocol.rs  Legacy adapters + canonical Signal type re-exports',
-          )
-          readme_path.write_text(readme)
-
-          tests = root / 'tests'
-          tests.mkdir(exist_ok=True)
-          (tests / 'interface_pin.rs').write_text(r'''use threefa_core::protocol as desktop;
-use threefa_interfaces as canonical;
-
-fn desktop_blob() -> desktop::SealedBlob {
-    desktop::SealedBlob {
-        ciphertext: vec![1, 2, 3, 4],
-        nonce: vec![5; desktop::NONCE_LEN],
-        kdf_salt: vec![6; 16],
-        kdf_params: desktop::KdfParams {
-            mem_kib: 262_144,
-            iterations: 3,
-            parallelism: 1,
-        },
-    }
-}
-
-fn canonical_blob() -> canonical::SealedBlob {
-    canonical::SealedBlob {
-        ciphertext: vec![1, 2, 3, 4],
-        nonce: vec![5; canonical::NONCE_LEN],
-        kdf_salt: vec![6; 16],
-        kdf_params: canonical::KdfParams {
-            mem_kib: 262_144,
-            iterations: 3,
-            parallelism: 1,
-        },
-    }
-}
-
-#[test]
-fn legacy_constants_match_the_canonical_contract() {
-    assert_eq!(desktop::PROTOCOL_VERSION, canonical::PROTOCOL_VERSION);
-    assert_eq!(desktop::NONCE_LEN, canonical::NONCE_LEN);
-    assert_eq!(desktop::MIN_KDF_SALT_LEN, canonical::MIN_KDF_SALT_LEN);
-    assert_eq!(desktop::MAX_KDF_SALT_LEN, canonical::MAX_KDF_SALT_LEN);
-    assert_eq!(desktop::MAX_CIPHERTEXT_LEN, canonical::MAX_CIPHERTEXT_LEN);
-    assert_eq!(desktop::MAX_VERSION_ENTRIES, canonical::MAX_VERSION_ENTRIES);
-    assert_eq!(desktop::MAX_DEVICE_ID_LEN, canonical::MAX_DEVICE_ID_LEN);
-}
-
-#[test]
-fn legacy_vault_json_matches_the_canonical_generated_types() {
-    assert_eq!(
-        serde_json::to_value(desktop_blob()).unwrap(),
-        serde_json::to_value(canonical_blob()).unwrap(),
-    );
-
-    let desktop_request = desktop::PushRequest {
-        device_id: "device-a".into(),
-        blob: desktop_blob(),
-        base_version: vec![desktop::VersionEntry {
-            device_id: "device-a".into(),
-            counter: 7,
-        }],
-    };
-    let canonical_request = canonical::PushRequest {
-        device_id: "device-a".into(),
-        blob: canonical_blob(),
-        base_version: vec![canonical::VersionEntry {
-            device_id: "device-a".into(),
-            counter: 7,
-        }],
-    };
-    assert_eq!(
-        serde_json::to_value(desktop_request).unwrap(),
-        serde_json::to_value(canonical_request).unwrap(),
-    );
-}
-
-#[test]
-fn new_signal_types_are_the_canonical_reexports() {
-    let envelope = desktop::SignalCiphertextEnvelope {
-        metadata: desktop::SignalEnvelopeMetadata {
-            version: 1,
-            envelope_id: "envelope-1".into(),
-            account_id: "account-1".into(),
-            sender_device_id: "sender-1".into(),
-            recipient_device_id: "recipient-1".into(),
-            session_id: "session-1".into(),
-            message_number: 1,
-            kind: "vault_mutation".into(),
-            created_at_ms: 1,
-            expires_at_ms: 2,
-        },
-        ciphertext: vec![9, 8, 7],
-    };
-    let value = serde_json::to_value(envelope).unwrap();
-    assert_eq!(value["metadata"]["recipient_device_id"], "recipient-1");
-    for forbidden in [
-        "identity_private_key",
-        "ratchet_state",
-        "vault_plaintext",
-        "pin_verifier",
-        "biometric_template",
-        "recovery_key",
-    ] {
-        assert!(value.get(forbidden).is_none());
-    }
-}
-''')
-
-          script = root / 'scripts' / 'check_vendored_interfaces.py'
-          script.parent.mkdir(exist_ok=True)
-          paths = [
-              'vendor/threefa-interfaces/Cargo.toml',
-              'vendor/threefa-interfaces/src/lib.rs',
-          ]
-          lines = [
-              'source_repository = "3FA-app/3fa-interfaces"',
-              f'source_commit = "{os.environ["INTERFACES_COMMIT"]}"',
-              '',
-              '[files]',
-          ]
-          for path in paths:
-              digest = subprocess.check_output(['git', 'hash-object', path], text=True).strip()
-              lines.append(f'"{path}" = "{digest}"')
-          (root / 'VENDORED_INTERFACES.toml').write_text('\n'.join(lines) + '\n')
-          script.write_text(r'''#!/usr/bin/env python3
-import pathlib
-import subprocess
-import tomllib
-
-root = pathlib.Path(__file__).resolve().parents[1]
-with (root / "VENDORED_INTERFACES.toml").open("rb") as handle:
-    manifest = tomllib.load(handle)
-assert manifest["source_repository"] == "3FA-app/3fa-interfaces"
-commit = manifest["source_commit"]
-assert len(commit) == 40 and all(ch in "0123456789abcdef" for ch in commit)
-for relative, expected in manifest["files"].items():
-    path = root / relative
-    assert path.is_file(), f"missing vendored interface file: {relative}"
-    actual = subprocess.check_output(["git", "hash-object", str(path)], text=True).strip()
-    assert actual == expected, f"vendored interface drift: {relative}"
-print(f"verified vendored interfaces from {commit}")
-''')
-
-          ci_path = root / '.github' / 'workflows' / 'ci.yml'
-          ci = ci_path.read_text()
-          marker = '  # src/protocol.rs must stay byte-identical to the backend\'s copy'
-          if marker in ci:
-              ci = ci.split(marker, 1)[0].rstrip() + '''\n\n  interface-provenance:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Verify immutable generated interface provenance\n        run: python3 scripts/check_vendored_interfaces.py\n      - name: Verify legacy JSON parity and canonical Signal re-exports\n        run: cargo test --no-default-features --test interface_pin\n'''
-          ci_path.write_text(ci)
+      - name: Apply immutable interface migration
+        run: python3 scripts/apply_interface_pin.py
 
       - name: Format and validate the self-contained desktop consumer
         run: |
@@ -227,14 +41,17 @@ print(f"verified vendored interfaces from {commit}")
           cargo check --no-default-features
           cargo test --no-default-features
 
-      - name: Remove temporary workflow
-        run: rm .github/workflows/apply-interface-pin.yml
+      - name: Remove one-shot migration helpers
+        run: |
+          rm .github/workflows/apply-interface-pin.yml
+          rm -f .github/workflows/kick-interface-pin.yml
+          rm scripts/apply_interface_pin.py
 
       - name: Commit validated immutable pin
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Cargo.toml Cargo.lock README.md src tests vendor scripts VENDORED_INTERFACES.toml .github/workflows
+          git add Cargo.toml Cargo.lock README.md src tests vendor scripts docs VENDORED_INTERFACES.toml .github/workflows
           git diff --cached --quiet && exit 0
           git commit -m "Pin desktop to canonical Signal interfaces"
           git push origin HEAD:agent/den-277-pin-canonical-interfaces
