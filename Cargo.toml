@@ -32,6 +32,7 @@ camera = ["dep:nokhwa"]
 sync-net = ["dep:reqwest", "dep:keyring"]
 
 [dependencies]
+threefa-interfaces = { path = "vendor/threefa-interfaces" }
 # Crypto / OTP core — RustCrypto stack, minimal third-party trust.
 argon2 = "0.5"
 chacha20poly1305 = "0.10"
