@@ -5679,8 +5679,16 @@ dependencies = [
  "slint-build",
  "subtle",
  "thiserror 2.0.18",
+ "threefa-interfaces",
  "url",
  "zeroize",
+]
+
+[[package]]
+name = "threefa-interfaces"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

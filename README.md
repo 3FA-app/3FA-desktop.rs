@@ -10,9 +10,9 @@ Rust with a pure-native
 > - **`3fa-backend.rs`** — zero-knowledge sync server (Rust + axum)
 > - **`3fa-website`** — marketing/download site (Astro)
 >
-> The sync wire-protocol types live in [`src/protocol.rs`](src/protocol.rs), a
-> copy kept byte-for-byte in sync with the backend's copy (guarded by
-> `PROTOCOL_VERSION`).
+> Canonical sync, Signal, device, and recovery wire types are vendored from
+> `3fa-interfaces` at an immutable commit with exact Git-blob provenance. Legacy
+> desktop vault-sync adapters in `src/protocol.rs` are JSON-parity tested against it.
 
 ## Security model
 
@@ -72,7 +72,7 @@ src/auth/      AuthFactor trait, passcode, biometric (per-OS), passkey, voice
 src/session.rs Auto-lock state machine (90s / 5min)
 src/pin_session.rs  PIN-sealed Supabase session + entry throttle (PinGuard)
 src/sync/      Zero-knowledge sync client + Supabase auth client
-src/protocol.rs  Wire-protocol DTOs (duplicated with the backend)
+src/protocol.rs  Legacy adapters + canonical Signal type re-exports
 ui/            Slint UI markup
 scripts/release/ Package binaries into per-OS zips + publish to S3
 ```
