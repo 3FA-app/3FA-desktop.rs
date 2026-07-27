@@ -13,23 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       INTERFACES_COMMIT: ef75da711138dfb96e4fe18a87f8d82efe997c0d
-      GENERATED_EXPORT_URL: 'https://sdmntprsoutheastus3.oaiusercontent.com/files/00000000-56a4-820c-b80c-e8a4f6f37919/raw?se=2026-07-27T21:27:20Z&sp=r&sv=2026-02-06&sr=b&scid=8b48e7c6-7a28-52ac-9ca8-a6230d7854cf&skoid=de71a0d5-fb02-4fce-be69-9296aced242b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-07-27T19:23:50Z&ske=2026-07-29T19:23:50Z&sks=b&skv=2026-02-06&sig=vrrDaUxWIQj6OUsOkNDZRV99YhQDoifbsx0QtPf7bsA%3D'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/den-277-pin-canonical-interfaces
           fetch-depth: 0
 
-      - name: Download validated canonical generated Rust package
-        run: |
-          set -euo pipefail
-          curl --fail --location --retry 3 --retry-all-errors \
-            "$GENERATED_EXPORT_URL" \
-            --output "$RUNNER_TEMP/generated-export.zip"
-          mkdir -p "$RUNNER_TEMP/export" "$RUNNER_TEMP/generated"
-          unzip -q "$RUNNER_TEMP/generated-export.zip" -d "$RUNNER_TEMP/export"
-          unzip -q "$RUNNER_TEMP/export/generated-interfaces.zip" -d "$RUNNER_TEMP/generated"
-          test "$(cat "$RUNNER_TEMP/export/generated-source-commit.txt")" = "$INTERFACES_COMMIT"
+      - name: Materialize validated canonical generated Rust package
+        run: python3 scripts/materialize_interface_payload.py
 
       - name: Apply immutable interface migration
         run: python3 scripts/apply_interface_pin.py
@@ -45,7 +36,7 @@ jobs:
         run: |
           rm .github/workflows/apply-interface-pin.yml
           rm -f .github/workflows/kick-interface-pin.yml
-          rm scripts/apply_interface_pin.py
+          rm scripts/apply_interface_pin.py scripts/materialize_interface_payload.py
 
       - name: Commit validated immutable pin
         run: |
