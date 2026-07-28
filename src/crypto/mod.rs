@@ -84,7 +84,7 @@ pub fn seal(key: &[u8; KEY_LEN], plaintext: &[u8], aad: &[u8]) -> Result<Sealed,
     let cipher = XChaCha20Poly1305::new(key.into());
     let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let nonce = <&XNonce>::try_from(nonce_bytes.as_slice()).map_err(|_| CryptoError::Encrypt)?;
 
     let ciphertext = cipher
         .encrypt(
@@ -111,7 +111,7 @@ pub fn open(
     aad: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     let cipher = XChaCha20Poly1305::new(key.into());
-    let nonce = XNonce::from_slice(&sealed.nonce);
+    let nonce = <&XNonce>::try_from(sealed.nonce.as_slice()).map_err(|_| CryptoError::Decrypt)?;
     let plaintext = cipher
         .decrypt(
             nonce,
