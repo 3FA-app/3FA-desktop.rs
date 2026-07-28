@@ -83,7 +83,7 @@ pub fn config_path() -> std::path::PathBuf {
 fn new_device_id() -> String {
     use rand::RngCore;
     let mut raw = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut raw);
+    rand::rng().fill_bytes(&mut raw);
     let mut s = String::with_capacity(32);
     for b in raw {
         s.push_str(&format!("{b:02x}"));
