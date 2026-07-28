@@ -35,12 +35,12 @@ sync-net = ["dep:reqwest", "dep:keyring"]
 threefa-interfaces = { path = "vendor/threefa-interfaces" }
 # Crypto / OTP core — RustCrypto stack, minimal third-party trust.
 argon2 = "0.5"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 hmac = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 rand = "0.9"
-rand_core = "0.6"
+rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
 base32 = "0.5"
