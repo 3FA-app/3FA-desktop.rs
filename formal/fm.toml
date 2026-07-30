@@ -1,0 +1,48 @@
+schema_version = 1
+id = "threefa-desktop-session"
+repository = "3FA-app/3FA-desktop.rs"
+issue = "DEN-80"
+model = "formal/session_model.py"
+runner = "python3"
+adapter_protocol = "json-stdin/v1"
+command = ["python3", "formal/session_model.py"]
+replay_command = ["python3", "formal/session_model.py", "--json-stdin"]
+claim = "finite-boundary-state-machine-abstraction"
+timeout_seconds = 30
+
+[constants]
+idle_timeout_seconds = 90
+max_session_seconds = 300
+
+[limits]
+boundary_times = 11
+activity_times = 5
+factor_outcomes = 2
+
+[[invariants]]
+id = "locked-clears-timers"
+description = "A locked session carries neither an open timestamp nor a last-activity timestamp."
+
+[[invariants]]
+id = "poll-enforces-idle"
+description = "Polling at or after 90 seconds of inactivity transitions to locked."
+
+[[invariants]]
+id = "poll-enforces-hard-cap"
+description = "Polling at or after 300 seconds from unlock transitions to locked regardless of activity."
+
+[[invariants]]
+id = "non-activity-does-not-extend"
+description = "Timer ticks, lock requests, and unsatisfied extension requests do not reset activity."
+
+[[invariants]]
+id = "extension-preserves-hard-cap"
+description = "A successful factor-gated extension resets only the idle timer and cannot pass the hard cap."
+
+[environment_assumptions]
+items = ["The GUI invokes poll before dispatching activity after a timer deadline.", "Time supplied to the state machine is monotonic."]
+
+[refinement]
+status = "required"
+production_paths = ["src/session.rs"]
+notes = "Headless Rust tests remain the production refinement gate; the model makes threshold and event-class assumptions explicit."
