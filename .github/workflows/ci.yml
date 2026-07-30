@@ -20,6 +20,13 @@ jobs:
         run: |
           bad=$(git ls-files | grep -E '(^|/)(target/|\.direnv/|\.env$|result$)' || true)
           if [ -n "$bad" ]; then echo "forbidden tracked files:"; echo "$bad"; exit 1; fi
+      - name: Formal session manifest and boundary model
+        run: python3 formal/session_model.py
+      - name: Formal session JSON-lines deadline witness
+        run: |
+          printf '%s\n' \
+            '{"op":"replay","events":[{"op":"unlock"},{"op":"advance","seconds":90},{"op":"poll"}]}' \
+            | python3 formal/session_model.py --json-stdin
       # The Slint GUI needs display/system deps; the core library is explicitly
       # designed to build and test headless (see Cargo.toml `gui` feature note).
       - run: cargo check --no-default-features
