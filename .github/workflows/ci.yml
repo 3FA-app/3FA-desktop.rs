@@ -9,11 +9,24 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate GitHub Actions
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: ./.github/workflows/ci.yml
       - name: No build artifacts or env files tracked
         run: |
           bad=$(git ls-files | grep -E '(^|/)(target/|\.direnv/|\.env$|result$)' || true)
           if [ -n "$bad" ]; then echo "forbidden tracked files:"; echo "$bad"; exit 1; fi
+      - name: Formal session manifest and boundary model
+        run: python3 formal/session_model.py
+      - name: Formal session JSON-lines deadline witness
+        run: |
+          printf '%s\n' \
+            '{"op":"replay","events":[{"op":"unlock"},{"op":"advance","seconds":90},{"op":"poll"}]}' \
+            | python3 formal/session_model.py --json-stdin
       # The Slint GUI needs display/system deps; the core library is explicitly
       # designed to build and test headless (see Cargo.toml `gui` feature note).
       - run: cargo check --no-default-features
@@ -21,21 +34,15 @@ jobs:
 
   # The shipped app, with the GUI and networking actually compiled.
   #
-  # Until now CI built ONLY `--no-default-features`, so src/ui.rs, src/sync/http.rs
-  # and src/sync/supabase.rs — the code that draws the app and carries the sync
-  # token — were never compiled here at all. Every transport-security test lived
-  # behind `sync-net` and therefore never ran, including the one asserting
-  # `localhost.evil.com` is not treated as loopback. A whole class of defect was
-  # structurally invisible.
-  #
   # macOS rather than Ubuntu on purpose: Slint builds on a mac runner with no
-  # extra system packages, and it is a platform the app actually ships on, so
-  # this job needs no speculative apt-get list to keep working. Compiling and
-  # unit-testing need no display — only *running* the GUI would.
+  # extra system packages, and it is a platform the app actually ships on.
+  # Compiling and unit-testing need no display — only running the GUI would.
   gui:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: rustup component add clippy
       - run: cargo check
       - run: cargo clippy --all-targets -- -D warnings
@@ -44,18 +51,18 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: cargo fmt --check
-  # src/protocol.rs must stay byte-identical to the backend's copy (the org
-  # invariant guarded by PROTOCOL_VERSION). Fail loudly on any drift.
-  protocol-identity:
+
+  interface-provenance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: 3FA-app/3fa-backend.rs
-          path: backend
-          # If the backend repo is private, a PAT with read access is required:
-          # token: ${{ secrets.THREEFA_REPO_TOKEN }}
-      - run: diff -u backend/src/protocol.rs src/protocol.rs
+          persist-credentials: false
+      - name: Verify immutable generated-interface provenance
+        run: python3 scripts/check_vendored_interfaces.py
+      - name: Verify legacy JSON parity and canonical Signal re-exports
+        run: cargo test --no-default-features --test interface_pin
