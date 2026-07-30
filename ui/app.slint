@@ -76,7 +76,9 @@ export component AppWindow inherits Window {
     in property <[AccountView]> accounts;
     in property <string> status;                   // error / info line
     in property <int> entered-length;              // dots filled on the pad
-    in property <int> session-seconds;             // remaining unlocked time
+    // Seconds until the vault actually locks — the *nearer* of the 90 s idle
+    // timeout and the 5 min hard cap, fed from `Session::lock_seconds_remaining`.
+    in property <int> lock-seconds;
     in property <bool> biometric-available;
     in property <bool> passkey-available;
     in property <bool> voice-available;
@@ -198,7 +200,7 @@ export component AppWindow inherits Window {
                 }
                 Rectangle {} // spacer
                 Text {
-                    text: "locks in " + root.session-seconds + "s";
+                    text: "locks in " + root.lock-seconds + "s";
                     color: #aeb4c2;
                     font-size: 12px;
                     vertical-alignment: center;

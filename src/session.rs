@@ -8,8 +8,12 @@
 //!   * After the 5-minute hard cap the vault re-locks no matter what.
 //!
 //! Time is injected (`now: Instant`) so the logic is unit-testable without real
-//! sleeps. The GUI calls [`Session::poll`] on a timer and on every user action
-//! calls [`Session::touch`].
+//! sleeps. The GUI calls [`Session::poll`] on a timer and reports every user
+//! interaction to [`Session::note_interaction`], which resets the idle timer for
+//! the interactions [`Interaction::is_user_activity`] classifies as real
+//! activity. That classification lives here, in the library, so it is unit-
+//! testable without a display server (`src/ui.rs` is GUI-only and never compiled
+//! by CI's headless build).
 
 use crate::auth::{FactorProof, Gate, PolicyEngine};
 use std::time::{Duration, Instant};
@@ -35,6 +39,55 @@ pub enum PollResult {
     JustLocked,
     /// Already locked.
     Locked,
+}
+
+/// Something the user (or the app's own timer) did, as reported by the GUI.
+///
+/// Only some of these are *user activity* for the purposes of the idle timer —
+/// see [`Interaction::is_user_activity`]. Keeping the list explicit (rather than
+/// sprinkling bare `touch` calls through the Slint callbacks) means the decision
+/// is reviewable and testable in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interaction {
+    /// A digit or backspace on the passcode pad.
+    KeypadInput,
+    /// Enrolling an account from a pasted/typed `otpauth://` URI.
+    AddAccount,
+    /// Starting a QR scan (image import or webcam).
+    ScanQr,
+    /// Revealing / copying a code to the clipboard.
+    CopyCode,
+    /// Moving between screens (vault ⇄ settings).
+    Navigate,
+    /// A sync, sign-in or PIN-unlock action from the settings screen.
+    Sync,
+    /// The 1 Hz refresh tick. **Not** activity: an app that touches itself has
+    /// no idle timeout at all, only the hard cap.
+    TimerTick,
+    /// Pressing "Keep open (+factor)". **Not** activity: extending is gated on a
+    /// second, distinct factor ([`Gate::Extend`]); letting the mere button press
+    /// reset the idle timer would silently route around that gate.
+    ExtendRequest,
+    /// Pressing "Lock now". **Not** activity: it locks the vault, and touching a
+    /// session on its way down is meaningless.
+    LockNow,
+}
+
+impl Interaction {
+    /// Whether this interaction is genuine user activity that should reset the
+    /// idle timer. Never resets the 5-minute hard cap — that is deliberate, and
+    /// is the reason both timers exist.
+    pub fn is_user_activity(self) -> bool {
+        match self {
+            Interaction::KeypadInput
+            | Interaction::AddAccount
+            | Interaction::ScanQr
+            | Interaction::CopyCode
+            | Interaction::Navigate
+            | Interaction::Sync => true,
+            Interaction::TimerTick | Interaction::ExtendRequest | Interaction::LockNow => false,
+        }
+    }
 }
 
 pub struct Session {
@@ -82,6 +135,17 @@ impl Session {
         }
     }
 
+    /// Report a GUI interaction. Resets the idle timer iff the interaction is
+    /// [user activity](Interaction::is_user_activity) and the vault is unlocked.
+    /// Returns whether the idle timer was actually reset.
+    pub fn note_interaction(&mut self, interaction: Interaction, now: Instant) -> bool {
+        if !interaction.is_user_activity() || self.state != SessionState::Unlocked {
+            return false;
+        }
+        self.touch(now);
+        true
+    }
+
     /// Force a lock and clear timers. The caller is responsible for zeroizing the
     /// in-memory DEK/vault.
     pub fn lock(&mut self) {
@@ -108,6 +172,18 @@ impl Session {
                 .as_secs(),
             None => 0,
         }
+    }
+
+    /// Seconds until the vault actually locks: whichever of the idle timeout and
+    /// the hard cap fires first. This — not either timer alone — is what the
+    /// "locks in {N}s" countdown must show, because [`Session::poll`] locks on
+    /// the *earlier* of the two.
+    pub fn lock_seconds_remaining(&self, now: Instant) -> u64 {
+        if self.state != SessionState::Unlocked {
+            return 0;
+        }
+        self.idle_seconds_remaining(now)
+            .min(self.session_seconds_remaining(now))
     }
 
     /// Drive the state machine. Locks on idle timeout OR hard cap.
@@ -220,6 +296,99 @@ mod tests {
         // A factor proof -> granted, idle timer reset.
         assert!(s.try_extend(at, &engine(), &[proof(FactorKind::Biometric)]));
         assert_eq!(s.poll(at + Duration::from_secs(89)), PollResult::Active);
+    }
+
+    #[test]
+    fn user_interactions_are_activity_and_app_driven_ones_are_not() {
+        for i in [
+            Interaction::KeypadInput,
+            Interaction::AddAccount,
+            Interaction::ScanQr,
+            Interaction::CopyCode,
+            Interaction::Navigate,
+            Interaction::Sync,
+        ] {
+            assert!(i.is_user_activity(), "{i:?} should reset the idle timer");
+        }
+        // A self-touching timer would abolish the idle timeout; "Keep open"
+        // must go through the factor gate; "Lock now" locks.
+        for i in [
+            Interaction::TimerTick,
+            Interaction::ExtendRequest,
+            Interaction::LockNow,
+        ] {
+            assert!(!i.is_user_activity(), "{i:?} must NOT reset the idle timer");
+        }
+    }
+
+    #[test]
+    fn note_interaction_resets_idle_timer_only_for_activity() {
+        let t0 = Instant::now();
+        let mut s = Session::new();
+        s.unlock(t0);
+
+        assert!(s.note_interaction(Interaction::CopyCode, t0 + Duration::from_secs(80)));
+        // 89 s since the copy, 169 s since unlock -> still open.
+        assert_eq!(s.poll(t0 + Duration::from_secs(169)), PollResult::Active);
+
+        // Ticks do not push the deadline out: 90 s after the last real activity
+        // the vault locks regardless of how many ticks happened in between.
+        for n in 1..=9 {
+            assert!(!s.note_interaction(Interaction::TimerTick, t0 + Duration::from_secs(80 + n)));
+        }
+        assert_eq!(
+            s.poll(t0 + Duration::from_secs(170)),
+            PollResult::JustLocked
+        );
+    }
+
+    #[test]
+    fn note_interaction_is_inert_while_locked() {
+        let t0 = Instant::now();
+        let mut s = Session::new();
+        assert!(!s.note_interaction(Interaction::KeypadInput, t0));
+        assert_eq!(s.state(), SessionState::Locked);
+        assert_eq!(s.lock_seconds_remaining(t0), 0);
+    }
+
+    #[test]
+    fn hard_cap_still_fires_under_continuous_activity() {
+        let t0 = Instant::now();
+        let mut s = Session::new();
+        s.unlock(t0);
+        // Interact every 10 s for the full 5 minutes: the idle timer never
+        // expires, but the cap is inviolable.
+        let mut t = t0;
+        for _ in 0..29 {
+            t += Duration::from_secs(10);
+            assert!(s.note_interaction(Interaction::KeypadInput, t));
+            assert_eq!(s.poll(t), PollResult::Active);
+        }
+        assert_eq!(s.poll(t0 + MAX_SESSION), PollResult::JustLocked);
+    }
+
+    #[test]
+    fn lock_countdown_tracks_whichever_deadline_fires_first() {
+        let t0 = Instant::now();
+        let mut s = Session::new();
+        s.unlock(t0);
+        // Fresh session: the 90 s idle timer is the nearer deadline, not the 300 s cap.
+        assert_eq!(s.lock_seconds_remaining(t0), IDLE_TIMEOUT.as_secs());
+        assert_eq!(s.lock_seconds_remaining(t0 + Duration::from_secs(30)), 60);
+
+        // Activity pushes the idle deadline out; the countdown follows it.
+        s.note_interaction(Interaction::AddAccount, t0 + Duration::from_secs(30));
+        assert_eq!(s.lock_seconds_remaining(t0 + Duration::from_secs(30)), 90);
+
+        // Late in the session the hard cap becomes the nearer deadline, so the
+        // countdown must switch to it even though activity just reset idle.
+        let late = t0 + MAX_SESSION - Duration::from_secs(20);
+        s.note_interaction(Interaction::CopyCode, late);
+        assert_eq!(s.lock_seconds_remaining(late), 20);
+
+        // And the number never outlives the session itself.
+        s.lock();
+        assert_eq!(s.lock_seconds_remaining(late), 0);
     }
 
     #[test]

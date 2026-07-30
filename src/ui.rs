@@ -20,7 +20,7 @@ use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
 use threefa_core::pin_session::{self, PinGate, PinGuard, SealedSessionFile, SessionSecrets};
-use threefa_core::session::{PollResult, Session};
+use threefa_core::session::{Interaction, PollResult, Session};
 use threefa_core::sync::http;
 use threefa_core::sync::supabase::{self, SupabaseConfig};
 use threefa_core::vault::{StoredAccount, VaultData, VaultFile};
@@ -62,6 +62,20 @@ impl AppState {
         let policy = self.data.as_ref().map(|d| d.policy).unwrap_or_default();
         PolicyEngine::new(policy)
     }
+}
+
+/// Report a GUI interaction to the session's idle timer.
+///
+/// Every Slint callback that represents the user *doing something* funnels
+/// through here; whether a given [`Interaction`] actually resets the timer is
+/// decided by [`Interaction::is_user_activity`] in the library (unit-tested
+/// there — this module is GUI-only and is not compiled by CI). Takes the borrow
+/// for the shortest possible moment so it can be called next to other borrows.
+fn note_activity(state: &Rc<RefCell<AppState>>, interaction: Interaction) {
+    state
+        .borrow_mut()
+        .session
+        .note_interaction(interaction, Instant::now());
 }
 
 fn now_unix() -> u64 {
@@ -151,6 +165,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let auto_submit;
             {
                 let mut s = state.borrow_mut();
+                s.session
+                    .note_interaction(Interaction::KeypadInput, Instant::now());
                 if s.entry.len() < 6 {
                     s.entry.push_str(&digit);
                 }
@@ -170,6 +186,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         app.on_key_backspace(move || {
             let Some(app) = weak.upgrade() else { return };
             let mut s = state.borrow_mut();
+            s.session
+                .note_interaction(Interaction::KeypadInput, Instant::now());
             s.entry.pop();
             app.set_entered_length(s.entry.len() as i32);
         });
@@ -181,6 +199,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_add_account(move |uri| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::AddAccount);
             apply_otpauth_uri(&app, &state, uri.as_str());
         });
     }
@@ -191,6 +210,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_scan_image(move || {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::ScanQr);
             let picked = rfd::FileDialog::new()
                 .add_filter("QR image", &["png", "jpg", "jpeg", "webp", "bmp"])
                 .set_title("Choose a QR code image")
@@ -198,7 +218,10 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let Some(path) = picked else { return };
             match threefa_core::qr::decode_image_path(&path) {
                 Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
-                Err(e) => app.set_status(format!("No otpauth QR found: {e}").into()),
+                // `QrError`'s messages are self-contained (and name the bulk-export
+                // case specifically), so show them as-is rather than under a
+                // "no otpauth QR found" prefix that would be wrong for most of them.
+                Err(e) => app.set_status(e.to_string().into()),
             }
         });
     }
@@ -209,6 +232,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_scan_camera(move || {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::ScanQr);
             #[cfg(feature = "camera")]
             {
                 // NOTE: blocking grab for up to 12s; a future pass can move this to
@@ -216,12 +240,11 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 app.set_status("Scanning — hold the QR up to the camera…".into());
                 match threefa_core::qr::scan_camera(std::time::Duration::from_secs(12)) {
                     Ok(uri) => apply_otpauth_uri(&app, &state, &uri),
-                    Err(e) => app.set_status(format!("Camera scan failed: {e}").into()),
+                    Err(e) => app.set_status(e.to_string().into()),
                 }
             }
             #[cfg(not(feature = "camera"))]
             {
-                let _ = &state;
                 app.set_status("Rebuild with `--features camera` to scan from the webcam".into());
             }
         });
@@ -233,6 +256,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_copy_code(move |id| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::CopyCode);
             let s = state.borrow();
             if let Some(data) = s.data.as_ref() {
                 if let Some(acct) = data.accounts.iter().find(|a| a.id == id.as_str()) {
@@ -251,6 +275,8 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_lock_now(move || {
             let Some(app) = weak.upgrade() else { return };
+            // Classified as non-activity: there is no idle timer left to reset.
+            note_activity(&state, Interaction::LockNow);
             state.borrow_mut().lock();
             app.set_screen("lock".into());
             app.set_entered_length(0);
@@ -264,6 +290,10 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_extend_session(move || {
             let Some(app) = weak.upgrade() else { return };
+            // Deliberately classified as NON-activity: pressing this button must
+            // not reset the idle timer as a side effect, or it would extend the
+            // session without ever satisfying the second-factor gate below.
+            note_activity(&state, Interaction::ExtendRequest);
             let mut s = state.borrow_mut();
             let engine = s.policy_engine();
             // With native factors stubbed, the only available extra factor today
@@ -311,9 +341,11 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
     // --- open / close the sync+settings screen ---
     {
+        let state = state.clone();
         let weak = weak.clone();
         app.on_open_settings(move || {
             if let Some(app) = weak.upgrade() {
+                note_activity(&state, Interaction::Navigate);
                 app.set_screen("settings".into());
                 app.set_sync_status("".into());
             }
@@ -324,6 +356,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_close_settings(move || {
             if let Some(app) = weak.upgrade() {
+                note_activity(&state, Interaction::Navigate);
                 let unlocked = state.borrow().data.is_some();
                 app.set_screen(if unlocked {
                     "vault".into()
@@ -340,6 +373,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_register(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             sync_authenticate(
                 &app,
                 &state,
@@ -356,6 +390,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_login(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             sync_authenticate(
                 &app,
                 &state,
@@ -372,6 +407,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_now(move |server, username, password| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             sync_run(
                 &app,
                 &state,
@@ -387,6 +423,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_supabase_signin(move |server, email, password, passphrase, pin| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             supabase_signin(
                 &app,
                 &state,
@@ -404,6 +441,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_sync_pin_unlock(move |server, pin, passphrase| {
             let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::Sync);
             pin_unlock(
                 &app,
                 &state,
@@ -812,7 +850,10 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         .collect();
     let model: ModelRc<AccountView> = ModelRc::new(VecModel::from(rows));
     app.set_accounts(model);
-    app.set_session_seconds(s.session.session_seconds_remaining(Instant::now()) as i32);
+    // Show whichever deadline fires first (idle timeout vs. hard cap) — the tick
+    // refreshes this every second, so it follows the idle timer as activity
+    // pushes it out and switches to the cap once the cap is the nearer of the two.
+    app.set_lock_seconds(s.session.lock_seconds_remaining(Instant::now()) as i32);
 }
 
 /// 1 Hz tick: refresh codes/countdowns and drive the auto-lock state machine.
@@ -825,6 +866,9 @@ fn spawn_tick(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         std::time::Duration::from_secs(1),
         move || {
             let Some(app) = weak.upgrade() else { return };
+            // NB: the tick only polls — it never touches the session
+            // (`Interaction::TimerTick` is classified as non-activity), because a
+            // self-touching timer would abolish the idle timeout entirely.
             let poll = state.borrow_mut().session.poll(Instant::now());
             match poll {
                 PollResult::JustLocked => {
@@ -859,6 +903,18 @@ fn collect_available_factor_proofs() -> Vec<FactorProof> {
 /// manual "Add" field and both QR scan paths so they all run the same validation
 /// and zeroization route (`OtpAccount` wipes its seed on drop).
 fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) {
+    // A Google Authenticator bulk-export URI parses as a URL but not as an
+    // account, and nothing in the crate expands it — say so plainly instead of
+    // letting `from_uri` report "not an otpauth:// URI". (Reached when the user
+    // pastes one; the scan paths reject it before they get here.)
+    if threefa_core::qr::is_migration_uri(uri) {
+        app.set_status(
+            threefa_core::qr::QrError::MigrationUnsupported
+                .to_string()
+                .into(),
+        );
+        return;
+    }
     match OtpAccount::from_uri(uri) {
         Ok(acct) => {
             {
