@@ -1,0 +1,6 @@
+source_repository = "3FA-app/3fa-interfaces"
+source_commit = "ef75da711138dfb96e4fe18a87f8d82efe997c0d"
+
+[files]
+"vendor/threefa-interfaces/Cargo.toml" = "413aac7d5eed0b3b5b45b41342d585357dd036be"
+"vendor/threefa-interfaces/src/lib.rs" = "afb90c5fdef9f169c17fdd6d86f909eb8436a82e"
