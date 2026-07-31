@@ -966,7 +966,7 @@ fn persist(path: &std::path::Path, file: &VaultFile) {
     }
 }
 
-fn set_clipboard(text: &str) {
+pub fn set_clipboard(text: &str) {
     if let Ok(mut cb) = arboard::Clipboard::new() {
         if cb.set_text(text.to_string()).is_ok() {
             schedule_clipboard_clear(text.to_string());

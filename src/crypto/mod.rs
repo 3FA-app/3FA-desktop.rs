@@ -60,14 +60,14 @@ pub fn derive_key(secret: &[u8], salt: &[u8], params: KdfParams) -> Result<Secre
 /// Generate a fresh random salt.
 pub fn random_salt() -> [u8; SALT_LEN] {
     let mut s = [0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut s);
+    rand::rng().fill_bytes(&mut s);
     s
 }
 
 /// Generate a fresh random 256-bit data-encryption key.
 pub fn random_key() -> SecretKey {
     let mut k = [0u8; KEY_LEN];
-    rand::thread_rng().fill_bytes(&mut k);
+    rand::rng().fill_bytes(&mut k);
     Zeroizing::new(k)
 }
 
@@ -83,8 +83,8 @@ pub struct Sealed {
 pub fn seal(key: &[u8; KEY_LEN], plaintext: &[u8], aad: &[u8]) -> Result<Sealed, CryptoError> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = <&XNonce>::try_from(nonce_bytes.as_slice()).map_err(|_| CryptoError::Encrypt)?;
 
     let ciphertext = cipher
         .encrypt(
@@ -111,7 +111,7 @@ pub fn open(
     aad: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     let cipher = XChaCha20Poly1305::new(key.into());
-    let nonce = XNonce::from_slice(&sealed.nonce);
+    let nonce = <&XNonce>::try_from(sealed.nonce.as_slice()).map_err(|_| CryptoError::Decrypt)?;
     let plaintext = cipher
         .decrypt(
             nonce,

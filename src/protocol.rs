@@ -1,10 +1,9 @@
 //! Sync-protocol DTOs + crypto envelope types.
 //!
-//! ⚠️ DUPLICATED across the frontend (`3fa-desktop.rs`) and backend
-//! (`3fa-backend.rs`) repos by design — they are separate repos with no shared
-//! crate. Keep the two copies byte-for-byte in sync; any divergence MUST bump
-//! [`PROTOCOL_VERSION`] so a mismatch is detected at the boundary rather than
-//! silently corrupting a sync.
+//! Legacy vault-sync DTOs remain local adapters while they carry desktop-only
+//! validation methods. Their wire shape is checked against the vendored canonical
+//! `threefa-interfaces` crate on every CI run. New Signal/device/recovery types are
+//! re-exported directly from that immutable generated package rather than copied.
 //!
 //! The cardinal rule of the zero-knowledge design is encoded in the types: the
 //! server only ever handles an opaque [`SealedBlob`] of ciphertext plus version
@@ -13,6 +12,17 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+pub use threefa_interfaces::{
+    AccountDeviceSummary, DeviceEnrollmentRequest, DeviceRevocationRequest,
+    EncryptedRecoveryPackage, LocalUnlockPolicy, PinKdfPolicy, RecoveryChallenge,
+    RecoveryChannelSummary, SignalCiphertextEnvelope, SignalDevicePreKeyBundle,
+    SignalDeviceRevisionResponse, SignalEnvelopeMetadata, SignalMailboxAckItem,
+    SignalMailboxAckRequest, SignalMailboxAckResponse, SignalMailboxItem,
+    SignalMailboxPullResponse, SignalOneTimePreKey, SignalPreKeyBundleResponse,
+    SignalPublishPreKeysRequest, SignalPublishPreKeysResponse, SignalQueueEnvelopeRequest,
+    SignalQueueEnvelopeResponse, UpsertRecoveryChannelRequest, VerifyRecoveryChallengeRequest,
+};
 
 /// Protocol version negotiated between client and server. Bump on ANY breaking
 /// change to the DTOs below (and to flag a copy drift between the two repos).

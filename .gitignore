@@ -21,3 +21,6 @@
 
 # Node (release tooling)
 node_modules
+
+# Local build/run logs
+/.artifacts
