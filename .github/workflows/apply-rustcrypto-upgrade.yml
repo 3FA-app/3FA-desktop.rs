@@ -44,17 +44,25 @@ jobs:
           text = manifest.read_text()
           before = 'hmac = "0.12"\nsha1 = "0.10"\nsha2 = "0.10"'
           after = 'hmac = "0.13"\nsha1 = "0.11"\nsha2 = "0.11"'
-          if text.count(before) != 1:
-              raise SystemExit('expected RustCrypto dependency block exactly once')
-          manifest.write_text(text.replace(before, after))
+          if before in text:
+              if text.count(before) != 1:
+                  raise SystemExit('ambiguous RustCrypto dependency block')
+              text = text.replace(before, after)
+          elif text.count(after) != 1:
+              raise SystemExit('missing reconciled RustCrypto dependency block')
+          manifest.write_text(text)
 
           otp = Path('src/otp/mod.rs')
           source = otp.read_text()
           before_import = 'use hmac::{Hmac, Mac};'
           after_import = 'use hmac::{Hmac, KeyInit, Mac};'
-          if source.count(before_import) != 1:
-              raise SystemExit('expected HMAC import exactly once')
-          otp.write_text(source.replace(before_import, after_import))
+          if before_import in source:
+              if source.count(before_import) != 1:
+                  raise SystemExit('ambiguous HMAC import')
+              source = source.replace(before_import, after_import)
+          elif source.count(after_import) != 1:
+              raise SystemExit('missing reconciled HMAC import')
+          otp.write_text(source)
           PY
           cargo update -p hmac --precise 0.13.0
           cargo update -p sha1 --precise 0.11.0
@@ -83,11 +91,11 @@ jobs:
       - name: Remove one-shot workflow and commit product files
         run: |
           set -euo pipefail
-          rm -f .github/workflows/apply-rustcrypto-upgrade.yml
+          git rm .github/workflows/apply-rustcrypto-upgrade.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          test "$(git diff --cached --name-only | sort)" = $'Cargo.lock\nCargo.toml\nsrc/otp/mod.rs'
+          test "$(git diff --cached --name-only | sort)" = $'.github/workflows/apply-rustcrypto-upgrade.yml\nCargo.lock\nCargo.toml\nsrc/otp/mod.rs'
           git commit -m 'build: upgrade the OTP RustCrypto digest stack'
           git push origin HEAD:agent/rustcrypto-0.11-0.13
