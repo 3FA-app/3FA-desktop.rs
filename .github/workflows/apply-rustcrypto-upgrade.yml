@@ -8,6 +8,7 @@ on:
       - '.github/workflows/apply-rustcrypto-upgrade.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'src/otp/mod.rs'
   workflow_dispatch:
 
 permissions:
@@ -38,18 +39,28 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('Cargo.toml')
-          text = path.read_text()
+
+          manifest = Path('Cargo.toml')
+          text = manifest.read_text()
           before = 'hmac = "0.12"\nsha1 = "0.10"\nsha2 = "0.10"'
-          after = 'hmac = "0.13"\nsha1 = "0.10"\nsha2 = "0.11"'
+          after = 'hmac = "0.13"\nsha1 = "0.11"\nsha2 = "0.11"'
           if text.count(before) != 1:
               raise SystemExit('expected RustCrypto dependency block exactly once')
-          path.write_text(text.replace(before, after))
+          manifest.write_text(text.replace(before, after))
+
+          otp = Path('src/otp/mod.rs')
+          source = otp.read_text()
+          before_import = 'use hmac::{Hmac, Mac};'
+          after_import = 'use hmac::{Hmac, KeyInit, Mac};'
+          if source.count(before_import) != 1:
+              raise SystemExit('expected HMAC import exactly once')
+          otp.write_text(source.replace(before_import, after_import))
           PY
           cargo update -p hmac --precise 0.13.0
+          cargo update -p sha1 --precise 0.11.0
           cargo update -p sha2 --precise 0.11.0
 
-      - name: Validate core OTP and interface contracts
+      - name: Validate all HOTP and TOTP algorithms plus interface contracts
         run: |
           set -euo pipefail
           cargo fmt --check
@@ -59,13 +70,15 @@ jobs:
           python3 scripts/check_vendored_interfaces.py
           git diff --check
 
-      - name: Prove both dependency families use one digest generation
+      - name: Prove the OTP dependency family shares digest 0.11
         run: |
           set -euo pipefail
           cargo tree -i digest@0.11.3
-          ! cargo tree -i digest@0.10.7 | grep -E '(^| )hmac v0\.13|(^| )sha2 v0\.11'
+          ! cargo tree -i digest@0.10.7 | grep -E '(^| )(hmac v0\.13|sha1 v0\.11|sha2 v0\.11)'
           grep -q '^hmac = "0.13"$' Cargo.toml
+          grep -q '^sha1 = "0.11"$' Cargo.toml
           grep -q '^sha2 = "0.11"$' Cargo.toml
+          grep -q 'use hmac::{Hmac, KeyInit, Mac};' src/otp/mod.rs
 
       - name: Remove one-shot workflow and commit product files
         run: |
@@ -75,6 +88,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          test "$(git diff --cached --name-only | sort)" = $'Cargo.lock\nCargo.toml'
-          git commit -m 'build: upgrade sha2 and hmac as one digest stack'
+          test "$(git diff --cached --name-only | sort)" = $'Cargo.lock\nCargo.toml\nsrc/otp/mod.rs'
+          git commit -m 'build: upgrade the OTP RustCrypto digest stack'
           git push origin HEAD:agent/rustcrypto-0.11-0.13
