@@ -31,6 +31,20 @@ These prohibitions are absolute. Do not weaken them based on an implied authoriz
 - Commit or safely stash work before integration. Use `git merge` or `git pull`; never use rebase to synchronize.
 - Never discard remote commits, bypass review, or bypass required CI.
 
+Concretely, to sync:
+
+1. **Commit your work first** so the tree is clean — pull and merge only into a
+   clean tree. `git pull` / `git merge` aborts when an incoming change touches a
+   file you have edited, and even when it does not, it buries the merge inside
+   your uncommitted work. If you cannot commit yet, `git stash` and `git stash
+   pop` after step 3.
+2. `git fetch --all --prune` — safe at any time; it only updates tracking refs.
+3. `git pull`, or `git merge` the upstream branch, to integrate their commits.
+4. `git push` to publish yours.
+
+You are synced only once local and remote hold the same commits; a clean tree
+is not evidence of that on its own.
+
 This repository is the source of truth. The copy vendored into `ORESoftware/k8s-cluster` under `remote/deployments/` is a secondary submodule checkout. After merging here, bump that submodule pointer; do not edit the secondary copy directly.
 
 ## Canonical interface provenance
