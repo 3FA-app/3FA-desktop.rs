@@ -1,0 +1,80 @@
+name: Apply coordinated RustCrypto upgrade
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-rustcrypto-upgrade.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-rustcrypto-upgrade
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.repository == 'ORESoftware/3FA-desktop.rs' &&
+      (github.event_name != 'pull_request' || github.head_ref == 'agent/rustcrypto-0.11-0.13')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout writable combined branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: agent/rustcrypto-0.11-0.13
+          fetch-depth: 0
+          persist-credentials: true
+          show-progress: false
+
+      - name: Apply the compatible digest-family upgrade together
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('Cargo.toml')
+          text = path.read_text()
+          before = 'hmac = "0.12"\nsha1 = "0.10"\nsha2 = "0.10"'
+          after = 'hmac = "0.13"\nsha1 = "0.10"\nsha2 = "0.11"'
+          if text.count(before) != 1:
+              raise SystemExit('expected RustCrypto dependency block exactly once')
+          path.write_text(text.replace(before, after))
+          PY
+          cargo update -p hmac --precise 0.13.0
+          cargo update -p sha2 --precise 0.11.0
+
+      - name: Validate core OTP and interface contracts
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo check --no-default-features
+          cargo test --no-default-features
+          cargo test --no-default-features --test interface_pin
+          python3 scripts/check_vendored_interfaces.py
+          git diff --check
+
+      - name: Prove both dependency families use one digest generation
+        run: |
+          set -euo pipefail
+          cargo tree -i digest@0.11.3
+          ! cargo tree -i digest@0.10.7 | grep -E '(^| )hmac v0\.13|(^| )sha2 v0\.11'
+          grep -q '^hmac = "0.13"$' Cargo.toml
+          grep -q '^sha2 = "0.11"$' Cargo.toml
+
+      - name: Remove one-shot workflow and commit product files
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-rustcrypto-upgrade.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          test "$(git diff --cached --name-only | sort)" = $'Cargo.lock\nCargo.toml'
+          git commit -m 'build: upgrade sha2 and hmac as one digest stack'
+          git push origin HEAD:agent/rustcrypto-0.11-0.13
