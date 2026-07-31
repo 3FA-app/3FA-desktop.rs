@@ -36,9 +36,15 @@ threefa-interfaces = { path = "vendor/threefa-interfaces" }
 # Crypto / OTP core — RustCrypto stack, minimal third-party trust.
 argon2 = "0.5"
 chacha20poly1305 = "0.11"
-hmac = "0.12"
-sha1 = "0.10"
-sha2 = "0.10"
+# The OTP digest stack moves as one `digest` 0.11 family: sha1 0.11 and sha2
+# 0.11 are built on it, and hmac 0.13 is the matching MAC. Mixing a 0.10-family
+# hash into hmac 0.13 does not compile — the trait bounds come from two
+# different `digest` crates — so these four version numbers are not independent
+# and must be bumped together. `KeyInit` is an explicit import in src/otp/mod.rs
+# for the same reason: the 0.11 family no longer re-exports it through `Mac`.
+hmac = "0.13"
+sha1 = "0.11"
+sha2 = "0.11"
 rand = "0.9"
 rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1.8", features = ["derive"] }
@@ -56,7 +62,7 @@ url = "2"
 
 # QR decode (image import) — pure-Rust, no display server, so it builds headless
 # and runs in tests. Image codecs restricted to the two formats QR exports use.
-rqrr = "0.9"
+rqrr = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # GUI (optional so the core lib builds headless)
