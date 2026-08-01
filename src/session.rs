@@ -310,6 +310,7 @@ mod tests {
             Interaction::AddAccount,
             Interaction::ScanQr,
             Interaction::CopyCode,
+            Interaction::AdvanceCounter,
             Interaction::Navigate,
             Interaction::Sync,
         ] {
