@@ -88,15 +88,34 @@ pub fn open_downloaded(blob: &SealedBlob, account_password: &[u8]) -> Result<Vau
 
 /// Merge a remote vault into the local one without losing enrollments.
 ///
-/// Accounts are unioned by their stable `id` (`issuer:label`); on a tie the local
-/// copy wins (it may hold a fresher HOTP counter). Local policy / voiceprint are
+/// Accounts are unioned by their stable `id` (`issuer:label`). On a tie the
+/// local copy wins for every field **except** a counter-based account's
+/// `counter`, where the *higher* of the two wins. Local policy / voiceprint are
 /// authoritative for this device. This is deliberately additive: a sync can add
 /// accounts seen on another device but never silently drop one you hold.
+///
+/// An HOTP counter is monotonic — it only moves forward, and only when a code is
+/// spent — so the larger value is the one that reflects codes already consumed
+/// somewhere. Keeping the local counter unconditionally (what this did before)
+/// never converged: two devices that had each advanced the same account would
+/// overwrite each other's counter on every push, and the user would be handed
+/// codes another device had already burned.
+///
+/// Must stay identical to Dart `mergeVault` in `client-ui.dart/lib/src/sync.dart`
+/// — the two clients merge the same server blob and have to agree on the result.
 pub fn merge_vault(local: &VaultData, remote: &VaultData) -> VaultData {
     let mut accounts = local.accounts.clone();
     for r in &remote.accounts {
-        if !accounts.iter().any(|a| a.id == r.id) {
-            accounts.push(r.clone());
+        match accounts.iter_mut().find(|a| a.id == r.id) {
+            None => accounts.push(r.clone()),
+            Some(local_account) => {
+                if local_account.is_counter_based()
+                    && r.is_counter_based()
+                    && r.counter > local_account.counter
+                {
+                    local_account.counter = r.counter;
+                }
+            }
         }
     }
     VaultData {
