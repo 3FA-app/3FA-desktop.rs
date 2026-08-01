@@ -133,6 +133,36 @@ impl StoredAccount {
         }
     }
 
+    /// True for an RFC 4226 (counter-based) account: its code changes only when
+    /// the user advances [`Self::counter`], never with the clock.
+    pub fn is_counter_based(&self) -> bool {
+        self.kind == StoredKind::Hotp
+    }
+
+    /// Move to the next HOTP code, consuming the current one.
+    ///
+    /// Returns `false` — leaving `counter` untouched — for a time-based account
+    /// or at `u64::MAX`. This only touches memory: the caller must re-seal and
+    /// persist the vault (see `ui::advance_hotp_counter`, which rolls this back
+    /// if the write fails).
+    ///
+    /// Nothing automatic may call this. An HOTP code is spent exactly once and
+    /// the service only accepts a small look-ahead window, so a counter that
+    /// moved on render, on a timer tick, or on sync would silently desynchronise
+    /// the account.
+    pub fn advance_counter(&mut self) -> bool {
+        if !self.is_counter_based() {
+            return false;
+        }
+        match self.counter.checked_add(1) {
+            Some(next) => {
+                self.counter = next;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Compute the current TOTP code (or HOTP at the stored counter).
     pub fn current_code(&self, unix_time: u64) -> Result<String, crate::otp::OtpError> {
         let code = match self.kind {

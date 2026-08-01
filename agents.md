@@ -29,7 +29,6 @@ These prohibitions are absolute. Do not weaken them based on an implied authoriz
 - Before editing, preserve existing work, inspect `git status`, the current branch, remotes, and the default branch, run `git fetch --all --prune`, and create the feature branch from the latest remote `main` rather than a stale local copy.
 - “Sync with the remote” is a two-way exchange: fetch and merge remote commits, then push local commits. A clean local tree alone is not synchronized.
 - Commit or safely stash work before integration. Use `git merge` or `git pull`; never use rebase to synchronize.
-- avoid git rebase in favor of git merge.
 - Never discard remote commits, bypass review, or bypass required CI.
 
 Concretely, to sync:
