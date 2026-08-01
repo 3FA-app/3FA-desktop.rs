@@ -246,13 +246,30 @@ export component AppWindow inherits Window {
                             font-family: "Menlo";
                             vertical-alignment: center;
                         }
-                        CountdownRing {
+                        // A counter-based code never expires, so a countdown
+                        // ring would tick toward a rollover that never happens.
+                        // Name the counter instead — it is also the number the
+                        // service asks for when an account has to be resynced.
+                        if !acct.counter-based: CountdownRing {
                             progress: acct.progress;
                             seconds: acct.seconds;
+                        }
+                        if acct.counter-based: Text {
+                            text: acct.counter-label;
+                            color: #8a90a0;
+                            font-size: 12px;
+                            vertical-alignment: center;
                         }
                         Button {
                             text: "Copy";
                             clicked => { root.copy-code(acct.id); }
+                        }
+                        // Spending a one-time code is always an explicit act:
+                        // this button is the only thing that moves a counter,
+                        // and it only exists on counter-based rows.
+                        if acct.counter-based: Button {
+                            text: "Next code";
+                            clicked => { root.advance-counter(acct.id); }
                         }
                     }
                 }
