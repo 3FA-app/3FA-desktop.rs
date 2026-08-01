@@ -269,6 +269,17 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         });
     }
 
+    // --- spend the current HOTP code and move to the next counter ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_advance_counter(move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::CopyCode);
+            advance_hotp_counter(&app, &state, id.as_str());
+        });
+    }
+
     // --- lock now ---
     {
         let state = state.clone();
