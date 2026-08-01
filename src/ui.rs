@@ -848,7 +848,14 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         .map(|a| {
             let code = a.current_code(unix).unwrap_or_else(|_| "------".into());
             let period = a.period.max(1);
-            let remaining = period - (unix % period);
+            // A counter-based code does not expire, so it has no window to count
+            // down; the view hides the ring and shows the counter instead.
+            let counter_based = a.is_counter_based();
+            let remaining = if counter_based {
+                0
+            } else {
+                period - (unix % period)
+            };
             AccountView {
                 id: a.id.clone().into(),
                 issuer: a.issuer.clone().into(),
@@ -856,6 +863,10 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 code: code.into(),
                 seconds: remaining as i32,
                 progress: remaining as f32 / period as f32,
+                counter_based,
+                // Formatted here because `counter` is a u64 and Slint's `int` is
+                // an i32 — narrowing it in the view could misreport it.
+                counter_label: format!("c{}", a.counter).into(),
             }
         })
         .collect();
