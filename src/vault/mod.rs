@@ -467,7 +467,11 @@ mod tests {
         let mut acct = hotp_account(0);
         for (counter, want) in RFC4226.iter().enumerate() {
             assert_eq!(acct.counter, counter as u64);
-            assert_eq!(&acct.current_code(0).unwrap(), want, "RFC 4226 counter {counter}");
+            assert_eq!(
+                &acct.current_code(0).unwrap(),
+                want,
+                "RFC 4226 counter {counter}"
+            );
             if counter + 1 < RFC4226.len() {
                 assert!(acct.advance_counter());
             }
@@ -524,7 +528,14 @@ mod tests {
         assert_eq!(
             keys,
             vec![
-                "algorithm", "counter", "digits", "id", "issuer", "kind", "label", "period",
+                "algorithm",
+                "counter",
+                "digits",
+                "id",
+                "issuer",
+                "kind",
+                "label",
+                "period",
                 "secret"
             ]
         );

@@ -68,9 +68,10 @@ impl AppState {
 ///
 /// Every Slint callback that represents the user *doing something* funnels
 /// through here; whether a given [`Interaction`] actually resets the timer is
-/// decided by [`Interaction::is_user_activity`] in the library (unit-tested
-/// there — this module is GUI-only and is not compiled by CI). Takes the borrow
-/// for the shortest possible moment so it can be called next to other borrows.
+/// decided by [`Interaction::is_user_activity`] in the library, which is where
+/// it is unit-tested — this module has no tests of its own, and CI's `gui` job
+/// compiles and lints it but never exercises it. Takes the borrow for the
+/// shortest possible moment so it can be called next to other borrows.
 fn note_activity(state: &Rc<RefCell<AppState>>, interaction: Interaction) {
     state
         .borrow_mut()
@@ -1042,7 +1043,9 @@ fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str
 
     match outcome {
         Ok(counter) => {
-            app.set_status(format!("Now showing code {counter} — the previous one is spent").into());
+            app.set_status(
+                format!("Now showing code {counter} — the previous one is spent").into(),
+            );
             refresh_vault(app, state);
         }
         Err(e) => app.set_status(format!("Could not save the new counter: {e}").into()),
