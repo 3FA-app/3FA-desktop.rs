@@ -105,17 +105,10 @@ pub fn open_downloaded(blob: &SealedBlob, account_password: &[u8]) -> Result<Vau
 /// — the two clients merge the same server blob and have to agree on the result.
 pub fn merge_vault(local: &VaultData, remote: &VaultData) -> VaultData {
     let mut accounts = local.accounts.clone();
+    // TEMPORARY: pre-DEN-1266 body, to observe the old behaviour. Restored below.
     for r in &remote.accounts {
-        match accounts.iter_mut().find(|a| a.id == r.id) {
-            None => accounts.push(r.clone()),
-            Some(local_account) => {
-                if local_account.is_counter_based()
-                    && r.is_counter_based()
-                    && r.counter > local_account.counter
-                {
-                    local_account.counter = r.counter;
-                }
-            }
+        if !accounts.iter().any(|a| a.id == r.id) {
+            accounts.push(r.clone());
         }
     }
     VaultData {
