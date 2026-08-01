@@ -17,7 +17,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate GitHub Actions
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
         with:
           args: ./.github/workflows/ci.yml
       - name: No build artifacts or env files tracked
