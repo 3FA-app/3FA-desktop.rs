@@ -275,7 +275,7 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let weak = weak.clone();
         app.on_advance_counter(move |id| {
             let Some(app) = weak.upgrade() else { return };
-            note_activity(&state, Interaction::CopyCode);
+            note_activity(&state, Interaction::AdvanceCounter);
             advance_hotp_counter(&app, &state, id.as_str());
         });
     }
