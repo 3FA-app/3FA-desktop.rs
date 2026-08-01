@@ -971,6 +971,84 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
     }
 }
 
+/// Spend the HOTP code on screen and move the account to its next counter.
+///
+/// Reachable only from the "Next code" button. An HOTP code is consumed exactly
+/// once and the service accepts only a small look-ahead window, so nothing
+/// automatic may call this: not [`spawn_tick`] (the 1 Hz refresh, which only
+/// re-renders), not [`sync_run`], not unlocking. `refresh_vault` reads
+/// `StoredAccount::counter`; this is the only place that writes it.
+///
+/// The counter is rolled back if the vault write fails, so the code on screen is
+/// never one the vault does not hold — otherwise a re-unlock would rewind to a
+/// code the user had already used.
+fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str) {
+    let outcome = {
+        let mut s = state.borrow_mut();
+        // Clone the DEK into a Zeroizing buffer (wiped on drop) rather than
+        // `**d`, which would copy the raw key onto the stack un-wiped. The clone
+        // also releases the borrow so `s.data`/`s.file` can be taken.
+        let dek = match s.dek.as_ref() {
+            Some(d) => d.clone(),
+            None => {
+                app.set_status("Unlock the vault before advancing a counter".into());
+                return;
+            }
+        };
+        let path = s.vault_path.clone();
+
+        let Some(data) = s.data.as_mut() else { return };
+        let Some(account) = data.accounts.iter_mut().find(|a| a.id == id) else {
+            return;
+        };
+        let previous = account.counter;
+        if !account.advance_counter() {
+            app.set_status(
+                if account.is_counter_based() {
+                    "This account has reached its counter limit"
+                } else {
+                    "Only counter-based (HOTP) accounts have a next code"
+                }
+                .into(),
+            );
+            return;
+        }
+        let counter = account.counter;
+
+        let snapshot = match s.data.as_ref() {
+            Some(d) => d.clone(),
+            None => return,
+        };
+        let Some(file) = s.file.as_mut() else { return };
+        let written = file
+            .reseal(&dek, &snapshot)
+            .map_err(|e| e.to_string())
+            .and_then(|()| persist_checked(&path, file));
+
+        match written {
+            Ok(()) => Ok(counter),
+            Err(e) => {
+                // Put the counter back: the user has not consumed a code, and a
+                // later unlock must not disagree with what is on screen.
+                if let Some(data) = s.data.as_mut() {
+                    if let Some(account) = data.accounts.iter_mut().find(|a| a.id == id) {
+                        account.counter = previous;
+                    }
+                }
+                Err(e)
+            }
+        }
+    };
+
+    match outcome {
+        Ok(counter) => {
+            app.set_status(format!("Now showing code {counter} — the previous one is spent").into());
+            refresh_vault(app, state);
+        }
+        Err(e) => app.set_status(format!("Could not save the new counter: {e}").into()),
+    }
+}
+
 /// Atomically write the sealed vault with owner-only permissions.
 ///
 /// The payload is already AEAD-encrypted, but the file still carries the KDF salt
