@@ -476,11 +476,14 @@ mod tests {
 
     #[test]
     fn advance_counter_refuses_totp_and_saturation() {
-        let mut totp = StoredAccount {
-            kind: StoredKind::Totp,
-            ..hotp_account(0)
-        };
-        assert!(!totp.advance_counter(), "a TOTP account has no counter to spend");
+        // Spelled out rather than `..hotp_account(0)`: `StoredAccount` is a
+        // `Drop` type, so struct-update syntax cannot partial-move out of it.
+        let mut totp = hotp_account(0);
+        totp.kind = StoredKind::Totp;
+        assert!(
+            !totp.advance_counter(),
+            "a TOTP account has no counter to spend"
+        );
         assert_eq!(totp.counter, 0);
 
         let mut maxed = hotp_account(u64::MAX);
