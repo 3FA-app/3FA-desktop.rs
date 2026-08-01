@@ -154,6 +154,9 @@ fn representative_contract_json_contains_no_plaintext_secret_fields() {
     .expect("serialize representative push request");
     let encoded = json.to_string().to_ascii_lowercase();
     for forbidden in ["otp_seed", "password", "vault_key", "plaintext"] {
-        assert!(!encoded.contains(forbidden), "wire contract exposed {forbidden}");
+        assert!(
+            !encoded.contains(forbidden),
+            "wire contract exposed {forbidden}"
+        );
     }
 }
