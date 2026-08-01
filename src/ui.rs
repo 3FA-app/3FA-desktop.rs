@@ -1020,11 +1020,12 @@ fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str
             Some(d) => d.clone(),
             None => return,
         };
-        let Some(file) = s.file.as_mut() else { return };
-        let written = file
-            .reseal(&dek, &snapshot)
-            .map_err(|e| e.to_string())
-            .and_then(|()| persist_checked(&path, file));
+        let written = {
+            let Some(file) = s.file.as_mut() else { return };
+            file.reseal(&dek, &snapshot)
+                .map_err(|e| e.to_string())
+                .and_then(|()| persist_checked(&path, file))
+        };
 
         match written {
             Ok(()) => Ok(counter),
@@ -1035,6 +1036,16 @@ fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str
                     if let Some(account) = data.accounts.iter_mut().find(|a| a.id == id) {
                         account.counter = previous;
                     }
+                }
+                // Re-seal from the rolled-back data too. `reseal` may have
+                // succeeded and only the disk write failed, which would leave the
+                // in-memory file holding a counter the user never spent. Every
+                // other `persist` call site happens to re-seal first, so nothing
+                // would write it today — but that is a global invariant, and this
+                // module has no tests to catch it if a future call site breaks it.
+                let rolled_back = s.data.clone();
+                if let (Some(file), Some(data)) = (s.file.as_mut(), rolled_back.as_ref()) {
+                    let _ = file.reseal(&dek, data);
                 }
                 Err(e)
             }
