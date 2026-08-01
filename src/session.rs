@@ -87,6 +87,7 @@ impl Interaction {
             | Interaction::AddAccount
             | Interaction::ScanQr
             | Interaction::CopyCode
+            | Interaction::AdvanceCounter
             | Interaction::Navigate
             | Interaction::Sync => true,
             Interaction::TimerTick | Interaction::ExtendRequest | Interaction::LockNow => false,
