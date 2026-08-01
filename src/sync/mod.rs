@@ -397,14 +397,21 @@ mod tests {
         assert_eq!(ids, vec!["AWS:b", "GitHub:a", "GitLab:c"]);
     }
 
+    /// A one-account vault holding an HOTP enrolment at `counter`. Fields are
+    /// spelled out because `..base` can't partial-move out of a `Drop` type.
     fn hotp_vault(counter: u64) -> VaultData {
         VaultData {
             accounts: vec![StoredAccount {
-                kind: StoredKind::Hotp,
+                id: "HOTPDemo:ctr".into(),
+                issuer: "HOTPDemo".into(),
+                label: "ctr".into(),
                 // RFC 4226 Appendix D seed.
                 secret: b"12345678901234567890".to_vec(),
+                kind: StoredKind::Hotp,
+                algorithm: StoredAlg::Sha1,
+                digits: 6,
+                period: 30,
                 counter,
-                ..account("HOTPDemo:ctr")
             }],
             policy: FactorPolicy::default(),
             voiceprint: None,
