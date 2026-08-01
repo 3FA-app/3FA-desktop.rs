@@ -14,8 +14,15 @@ export struct AccountView {
     issuer: string,
     label: string,
     code: string,
-    seconds: int,    // seconds left in the current TOTP window
-    progress: float, // 0.0..1.0 for the countdown ring
+    seconds: int,    // seconds left in the current TOTP window (0 for HOTP)
+    progress: float, // 0.0..1.0 for the countdown ring (0 for HOTP)
+    // True for an RFC 4226 account: its code changes only when the user asks
+    // for the next one, never with the clock. Drives both the counter label
+    // below and whether the "Next code" button exists at all.
+    counter-based: bool,
+    // Pre-rendered "c<n>" — the counter is a u64 in Rust, so it is formatted on
+    // the Rust side rather than narrowed into a Slint `int`.
+    counter-label: string,
 }
 
 // A single key on the passcode pad.
