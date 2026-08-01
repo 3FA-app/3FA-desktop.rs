@@ -397,6 +397,104 @@ mod tests {
         assert_eq!(ids, vec!["AWS:b", "GitHub:a", "GitLab:c"]);
     }
 
+    fn hotp_vault(counter: u64) -> VaultData {
+        VaultData {
+            accounts: vec![StoredAccount {
+                kind: StoredKind::Hotp,
+                // RFC 4226 Appendix D seed.
+                secret: b"12345678901234567890".to_vec(),
+                counter,
+                ..account("HOTPDemo:ctr")
+            }],
+            policy: FactorPolicy::default(),
+            voiceprint: None,
+            voice_pin_hash: None,
+        }
+    }
+
+    /// A counter this device just advanced must survive a sync against a server
+    /// copy that is behind — otherwise the merge would hand back a code the user
+    /// already used.
+    #[test]
+    fn merge_keeps_the_locally_advanced_hotp_counter() {
+        let merged = merge_vault(&hotp_vault(9), &hotp_vault(3));
+        assert_eq!(merged.accounts[0].counter, 9);
+        // RFC 4226 Appendix D: counter 9 for this seed.
+        assert_eq!(merged.accounts[0].current_code(0).unwrap(), "520489");
+    }
+
+    /// And the converse: another device that got further ahead wins, because its
+    /// counter names codes that have already been spent.
+    #[test]
+    fn merge_takes_the_higher_remote_hotp_counter() {
+        let merged = merge_vault(&hotp_vault(3), &hotp_vault(7));
+        assert_eq!(merged.accounts[0].counter, 7);
+        // RFC 4226 Appendix D: counter 7 for this seed.
+        assert_eq!(merged.accounts[0].current_code(0).unwrap(), "162583");
+    }
+
+    /// max() is commutative, so two devices settle on one counter instead of
+    /// overwriting each other on every push.
+    #[test]
+    fn merge_converges_regardless_of_direction() {
+        assert_eq!(
+            merge_vault(&hotp_vault(5), &hotp_vault(2)).accounts[0].counter,
+            merge_vault(&hotp_vault(2), &hotp_vault(5)).accounts[0].counter
+        );
+    }
+
+    /// A TOTP account derives its counter from the clock; the stored field is not
+    /// a spend count, so the merge must leave it alone.
+    #[test]
+    fn merge_does_not_reconcile_totp_counters() {
+        let local = vault_with(&["GitHub:a"]);
+        let mut remote = vault_with(&["GitHub:a"]);
+        remote.accounts[0].counter = 99;
+        let merged = merge_vault(&local, &remote);
+        assert_eq!(merged.accounts[0].counter, 0);
+    }
+
+    /// `merge_vault` takes `&VaultData`; prove it really is pure, so the caller's
+    /// own vault is never edited behind its back.
+    #[test]
+    fn merge_does_not_mutate_its_inputs() {
+        let local = hotp_vault(3);
+        let remote = hotp_vault(7);
+        let _ = merge_vault(&local, &remote);
+        assert_eq!(local.accounts[0].counter, 3);
+        assert_eq!(remote.accounts[0].counter, 7);
+    }
+
+    /// End to end through `synchronize`: device A advances to 7 and pushes;
+    /// device B is still at 3, syncs, and comes back holding 7 — and what the
+    /// server stores decrypts to 7 as well.
+    #[test]
+    fn synchronize_converges_on_the_higher_hotp_counter() {
+        let password = b"correct horse battery".to_vec();
+        let mut server = FakeServer {
+            password: password.clone(),
+            stored: None,
+            version: Vec::new(),
+        };
+
+        let (a_merged, _) = synchronize(&mut server, &password, "devA", &hotp_vault(7)).unwrap();
+        assert_eq!(a_merged.accounts[0].counter, 7);
+
+        let (b_merged, _) = synchronize(&mut server, &password, "devB", &hotp_vault(3)).unwrap();
+        assert_eq!(
+            b_merged.accounts[0].counter, 7,
+            "the device that was behind must adopt the further-ahead counter"
+        );
+        assert_eq!(b_merged.accounts[0].current_code(0).unwrap(), "162583");
+
+        let stored = server.stored.clone().unwrap();
+        let back = open_downloaded(&stored, &server.password).unwrap();
+        assert_eq!(
+            back.accounts[0].counter, 7,
+            "and the server ends up holding it, so device A is not rewound on its next pull"
+        );
+    }
+
     /// In-memory stand-in for the server: mirrors the backend's version-vector
     /// reconcile (`vault_blob::reconcile`) so `synchronize` can be exercised
     /// without a database or network.
