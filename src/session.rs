@@ -57,6 +57,10 @@ pub enum Interaction {
     ScanQr,
     /// Revealing / copying a code to the clipboard.
     CopyCode,
+    /// Pressing "Next code" on a counter-based (HOTP) account. Genuine user
+    /// activity — unlike [`Self::ExtendRequest`] it is not a request to bypass
+    /// a gate, it is the user consuming a code they asked for.
+    AdvanceCounter,
     /// Moving between screens (vault ⇄ settings).
     Navigate,
     /// A sync, sign-in or PIN-unlock action from the settings screen.
@@ -83,6 +87,7 @@ impl Interaction {
             | Interaction::AddAccount
             | Interaction::ScanQr
             | Interaction::CopyCode
+            | Interaction::AdvanceCounter
             | Interaction::Navigate
             | Interaction::Sync => true,
             Interaction::TimerTick | Interaction::ExtendRequest | Interaction::LockNow => false,
@@ -305,6 +310,7 @@ mod tests {
             Interaction::AddAccount,
             Interaction::ScanQr,
             Interaction::CopyCode,
+            Interaction::AdvanceCounter,
             Interaction::Navigate,
             Interaction::Sync,
         ] {
