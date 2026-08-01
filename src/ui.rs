@@ -1057,13 +1057,21 @@ fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str
 /// mid-write can never truncate the live vault into an unparseable state — which
 /// the loader would treat as "no vault", silently dropping every enrolled account.
 fn persist(path: &std::path::Path, file: &VaultFile) {
+    if let Err(e) = persist_checked(path, file) {
+        eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
+    }
+}
+
+/// The write itself, with the failure surfaced instead of logged.
+///
+/// Callers that merely append (adding an account, storing a sync result) can log
+/// and move on; `advance_hotp_counter` cannot, because it has to undo the
+/// in-memory counter when the write fails.
+fn persist_checked(path: &std::path::Path, file: &VaultFile) -> Result<(), String> {
     // Crash-safe, owner-only write so a power loss mid-save can't truncate the
     // user's only copy of their seeds (see `threefa_core::write_private_atomic`).
-    if let Ok(bytes) = serde_json::to_vec(file) {
-        if let Err(e) = threefa_core::write_private_atomic(path, &bytes) {
-            eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
-        }
-    }
+    let bytes = serde_json::to_vec(file).map_err(|e| e.to_string())?;
+    threefa_core::write_private_atomic(path, &bytes).map_err(|e| e.to_string())
 }
 
 pub fn set_clipboard(text: &str) {
