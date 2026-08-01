@@ -104,6 +104,9 @@ export component AppWindow inherits Window {
     callback scan-image();                         // pick an image file, decode its QR
     callback scan-camera();                         // scan a QR from the webcam
     callback copy-code(string);                    // account id
+    // Spend the HOTP code on screen and move to the next counter (account id).
+    // Only ever raised by the "Next code" button below — never by the tick.
+    callback advance-counter(string);
     callback lock-now();
     callback extend-session();
     callback open-settings();
