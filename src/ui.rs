@@ -977,8 +977,12 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
 /// Reachable only from the "Next code" button. An HOTP code is consumed exactly
 /// once and the service accepts only a small look-ahead window, so nothing
 /// automatic may call this: not [`spawn_tick`] (the 1 Hz refresh, which only
-/// re-renders), not [`sync_run`], not unlocking. `refresh_vault` reads
-/// `StoredAccount::counter`; this is the only place that writes it.
+/// re-renders), not [`sync_run`], not unlocking.
+///
+/// This is the only code that *advances* a counter. `sync::merge_vault` also
+/// assigns one, but only ever adopts a higher counter another device already
+/// reached; it never moves past what some device has actually spent.
+/// `refresh_vault` only reads.
 ///
 /// The counter is rolled back if the vault write fails, so the code on screen is
 /// never one the vault does not hold — otherwise a re-unlock would rewind to a
