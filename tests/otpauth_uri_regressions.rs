@@ -1,6 +1,6 @@
 use threefa_core::otp::{
-    Algorithm,
     uri::{OtpAccount, OtpKind, UriError},
+    Algorithm,
 };
 
 const SECRET: &str = "JBSWY3DPEHPK3PXP";
@@ -74,9 +74,7 @@ fn hotp_preserves_large_counters_and_totp_preserves_custom_periods() {
 fn unsupported_otp_hosts_do_not_fall_back_to_totp() {
     for kind in ["steam", "ocra", "totp-extra"] {
         assert!(matches!(
-            OtpAccount::from_uri(&format!(
-                "otpauth://{kind}/account?secret={SECRET}"
-            )),
+            OtpAccount::from_uri(&format!("otpauth://{kind}/account?secret={SECRET}")),
             Err(UriError::UnsupportedType)
         ));
     }
