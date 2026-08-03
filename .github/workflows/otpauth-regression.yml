@@ -1,0 +1,49 @@
+name: otpauth-regression
+
+on:
+  pull_request:
+    paths:
+      - "src/otp/**"
+      - "tests/otpauth_uri_regressions.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - "src/otp/**"
+      - "tests/otpauth_uri_regressions.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/**"
+  schedule:
+    - cron: "23 7 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: otpauth-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  uri-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate all workflows
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: "1.80.0"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run headless URI regression suite
+        run: cargo test --locked --no-default-features --test otpauth_uri_regressions
+      - name: Run URI regression suite with release optimizations
+        run: cargo test --locked --release --no-default-features --test otpauth_uri_regressions
+      - name: Check OTP documentation examples
+        run: cargo test --locked --doc --no-default-features otp
