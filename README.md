@@ -10,9 +10,36 @@ Rust with a pure-native
 > - **`3fa-backend.rs`** — zero-knowledge sync server (Rust + axum)
 > - **`3fa-website`** — marketing/download site (Astro)
 >
-> Canonical sync, Signal, device, and recovery wire types are vendored from
-> `3fa-interfaces` at an immutable commit with exact Git-blob provenance. Legacy
-> desktop vault-sync adapters in `src/protocol.rs` are JSON-parity tested against it.
+> Canonical sync, Signal, device, recovery, and future deep-link wire types are
+> vendored from `3fa-interfaces` at an immutable commit with exact Git-blob
+> provenance. Legacy desktop vault-sync adapters in `src/protocol.rs` are
+> JSON-parity tested against it.
+
+## Desktop toolkit and Flutter companion
+
+The selected Rust desktop strategy is **Slint with no WebView**. This decision is
+intentional for security, startup performance, memory use, deterministic native
+behavior, and direct operating-system integration. See
+[`docs/DESKTOP_TOOLKIT.md`](docs/DESKTOP_TOOLKIT.md) for the complete toolkit,
+privilege-boundary, test, packaging, and HTTPS-first deep-link contract.
+
+The current Flutter companion is
+[`ORESoftware/3fa-client-ui.dart`](https://github.com/ORESoftware/3fa-client-ui.dart).
+The canonical organization-owned migration target is `3FA-app/3fa-flutter`; it
+must not be described as published until its remote, history/functionality,
+native builds, tests, packaging, signing, and reciprocal links are verified.
+
+Rust and Flutter are both first-class product implementations. Every
+desktop-facing feature must inspect both repositories and normally update both.
+A one-sided change requires an explicit no-change rationale and recorded parity
+gap. The pair is maintained to compare security, performance, OS integration,
+accessibility, developer velocity, mobile reuse, release engineering, and
+long-term maintenance with real product features.
+
+Deep links use an HTTPS-first route family under a verified 3FA-owned host, with
+`threefa://` as the desktop fallback scheme. URLs are untrusted input and must
+never contain passwords, tokens, TOTP/HOTP seeds, recovery secrets, vault
+contents, or encryption keys.
 
 ## Security model
 
