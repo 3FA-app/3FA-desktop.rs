@@ -81,7 +81,7 @@ pub fn config_path() -> std::path::PathBuf {
 
 /// A 128-bit random, URL-safe device id (matches `protocol::device_id_is_valid`).
 fn new_device_id() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut raw = [0u8; 16];
     rand::rng().fill_bytes(&mut raw);
     let mut s = String::with_capacity(32);

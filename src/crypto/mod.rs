@@ -16,7 +16,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
 };
-use rand::RngCore;
+use rand::Rng;
 use zeroize::{Zeroize, Zeroizing};
 
 pub const KEY_LEN: usize = 32;
