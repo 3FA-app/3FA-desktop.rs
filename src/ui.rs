@@ -68,9 +68,10 @@ impl AppState {
 ///
 /// Every Slint callback that represents the user *doing something* funnels
 /// through here; whether a given [`Interaction`] actually resets the timer is
-/// decided by [`Interaction::is_user_activity`] in the library (unit-tested
-/// there — this module is GUI-only and is not compiled by CI). Takes the borrow
-/// for the shortest possible moment so it can be called next to other borrows.
+/// decided by [`Interaction::is_user_activity`] in the library, which is where
+/// it is unit-tested — this module has no tests of its own, and CI's `gui` job
+/// compiles and lints it but never exercises it. Takes the borrow for the
+/// shortest possible moment so it can be called next to other borrows.
 fn note_activity(state: &Rc<RefCell<AppState>>, interaction: Interaction) {
     state
         .borrow_mut()
@@ -266,6 +267,17 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                     }
                 }
             }
+        });
+    }
+
+    // --- spend the current HOTP code and move to the next counter ---
+    {
+        let state = state.clone();
+        let weak = weak.clone();
+        app.on_advance_counter(move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            note_activity(&state, Interaction::AdvanceCounter);
+            advance_hotp_counter(&app, &state, id.as_str());
         });
     }
 
@@ -837,7 +849,14 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         .map(|a| {
             let code = a.current_code(unix).unwrap_or_else(|_| "------".into());
             let period = a.period.max(1);
-            let remaining = period - (unix % period);
+            // A counter-based code does not expire, so it has no window to count
+            // down; the view hides the ring and shows the counter instead.
+            let counter_based = a.is_counter_based();
+            let remaining = if counter_based {
+                0
+            } else {
+                period - (unix % period)
+            };
             AccountView {
                 id: a.id.clone().into(),
                 issuer: a.issuer.clone().into(),
@@ -845,6 +864,10 @@ fn refresh_vault(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 code: code.into(),
                 seconds: remaining as i32,
                 progress: remaining as f32 / period as f32,
+                counter_based,
+                // Formatted here because `counter` is a u64 and Slint's `int` is
+                // an i32 — narrowing it in the view could misreport it.
+                counter_label: format!("c{}", a.counter).into(),
             }
         })
         .collect();
@@ -949,6 +972,101 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
     }
 }
 
+/// Spend the HOTP code on screen and move the account to its next counter.
+///
+/// Reachable only from the "Next code" button. An HOTP code is consumed exactly
+/// once and the service accepts only a small look-ahead window, so nothing
+/// automatic may call this: not [`spawn_tick`] (the 1 Hz refresh, which only
+/// re-renders), not [`sync_run`], not unlocking.
+///
+/// This is the only code that *advances* a counter. `sync::merge_vault` also
+/// assigns one, but only ever adopts a higher counter another device already
+/// reached; it never moves past what some device has actually spent.
+/// `refresh_vault` only reads.
+///
+/// The counter is rolled back if the vault write fails, so the code on screen is
+/// never one the vault does not hold — otherwise a re-unlock would rewind to a
+/// code the user had already used.
+fn advance_hotp_counter(app: &AppWindow, state: &Rc<RefCell<AppState>>, id: &str) {
+    let outcome = {
+        let mut s = state.borrow_mut();
+        // Clone the DEK into a Zeroizing buffer (wiped on drop) rather than
+        // `**d`, which would copy the raw key onto the stack un-wiped. The clone
+        // also releases the borrow so `s.data`/`s.file` can be taken.
+        let dek = match s.dek.as_ref() {
+            Some(d) => d.clone(),
+            None => {
+                app.set_status("Unlock the vault before advancing a counter".into());
+                return;
+            }
+        };
+        let path = s.vault_path.clone();
+
+        let Some(data) = s.data.as_mut() else { return };
+        let Some(account) = data.accounts.iter_mut().find(|a| a.id == id) else {
+            return;
+        };
+        let previous = account.counter;
+        if !account.advance_counter() {
+            app.set_status(
+                if account.is_counter_based() {
+                    "This account has reached its counter limit"
+                } else {
+                    "Only counter-based (HOTP) accounts have a next code"
+                }
+                .into(),
+            );
+            return;
+        }
+        let counter = account.counter;
+
+        let snapshot = match s.data.as_ref() {
+            Some(d) => d.clone(),
+            None => return,
+        };
+        let written = {
+            let Some(file) = s.file.as_mut() else { return };
+            file.reseal(&dek, &snapshot)
+                .map_err(|e| e.to_string())
+                .and_then(|()| persist_checked(&path, file))
+        };
+
+        match written {
+            Ok(()) => Ok(counter),
+            Err(e) => {
+                // Put the counter back: the user has not consumed a code, and a
+                // later unlock must not disagree with what is on screen.
+                if let Some(data) = s.data.as_mut() {
+                    if let Some(account) = data.accounts.iter_mut().find(|a| a.id == id) {
+                        account.counter = previous;
+                    }
+                }
+                // Re-seal from the rolled-back data too. `reseal` may have
+                // succeeded and only the disk write failed, which would leave the
+                // in-memory file holding a counter the user never spent. Every
+                // other `persist` call site happens to re-seal first, so nothing
+                // would write it today — but that is a global invariant, and this
+                // module has no tests to catch it if a future call site breaks it.
+                let rolled_back = s.data.clone();
+                if let (Some(file), Some(data)) = (s.file.as_mut(), rolled_back.as_ref()) {
+                    let _ = file.reseal(&dek, data);
+                }
+                Err(e)
+            }
+        }
+    };
+
+    match outcome {
+        Ok(counter) => {
+            app.set_status(
+                format!("Now showing code {counter} — the previous one is spent").into(),
+            );
+            refresh_vault(app, state);
+        }
+        Err(e) => app.set_status(format!("Could not save the new counter: {e}").into()),
+    }
+}
+
 /// Atomically write the sealed vault with owner-only permissions.
 ///
 /// The payload is already AEAD-encrypted, but the file still carries the KDF salt
@@ -957,13 +1075,21 @@ fn apply_otpauth_uri(app: &AppWindow, state: &Rc<RefCell<AppState>>, uri: &str) 
 /// mid-write can never truncate the live vault into an unparseable state — which
 /// the loader would treat as "no vault", silently dropping every enrolled account.
 fn persist(path: &std::path::Path, file: &VaultFile) {
+    if let Err(e) = persist_checked(path, file) {
+        eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
+    }
+}
+
+/// The write itself, with the failure surfaced instead of logged.
+///
+/// Callers that merely append (adding an account, storing a sync result) can log
+/// and move on; `advance_hotp_counter` cannot, because it has to undo the
+/// in-memory counter when the write fails.
+fn persist_checked(path: &std::path::Path, file: &VaultFile) -> Result<(), String> {
     // Crash-safe, owner-only write so a power loss mid-save can't truncate the
     // user's only copy of their seeds (see `threefa_core::write_private_atomic`).
-    if let Ok(bytes) = serde_json::to_vec(file) {
-        if let Err(e) = threefa_core::write_private_atomic(path, &bytes) {
-            eprintln!("3fa: failed to persist vault to {}: {e}", path.display());
-        }
-    }
+    let bytes = serde_json::to_vec(file).map_err(|e| e.to_string())?;
+    threefa_core::write_private_atomic(path, &bytes).map_err(|e| e.to_string())
 }
 
 pub fn set_clipboard(text: &str) {

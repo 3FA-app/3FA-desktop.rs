@@ -133,6 +133,36 @@ impl StoredAccount {
         }
     }
 
+    /// True for an RFC 4226 (counter-based) account: its code changes only when
+    /// the user advances [`Self::counter`], never with the clock.
+    pub fn is_counter_based(&self) -> bool {
+        self.kind == StoredKind::Hotp
+    }
+
+    /// Move to the next HOTP code, consuming the current one.
+    ///
+    /// Returns `false` — leaving `counter` untouched — for a time-based account
+    /// or at `u64::MAX`. This only touches memory: the caller must re-seal and
+    /// persist the vault (see `ui::advance_hotp_counter`, which rolls this back
+    /// if the write fails).
+    ///
+    /// Nothing automatic may call this. An HOTP code is spent exactly once and
+    /// the service only accepts a small look-ahead window, so a counter that
+    /// moved on render, on a timer tick, or on sync would silently desynchronise
+    /// the account.
+    pub fn advance_counter(&mut self) -> bool {
+        if !self.is_counter_based() {
+            return false;
+        }
+        match self.counter.checked_add(1) {
+            Some(next) => {
+                self.counter = next;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Compute the current TOTP code (or HOTP at the stored counter).
     pub fn current_code(&self, unix_time: u64) -> Result<String, crate::otp::OtpError> {
         let code = match self.kind {
@@ -406,6 +436,111 @@ mod tests {
         assert_eq!(acct.current_code(999_999).unwrap(), "969429");
         acct.counter = 7;
         assert_eq!(acct.current_code(0).unwrap(), "162583");
+    }
+
+    fn hotp_account(counter: u64) -> StoredAccount {
+        StoredAccount {
+            id: "HOTPDemo:ctr".into(),
+            issuer: "HOTPDemo".into(),
+            label: "ctr".into(),
+            // RFC 4226 Appendix D seed.
+            secret: b"12345678901234567890".to_vec(),
+            kind: StoredKind::Hotp,
+            algorithm: StoredAlg::Sha1,
+            digits: 6,
+            period: 30,
+            counter,
+        }
+    }
+
+    /// RFC 4226 Appendix D, counters 0..=9 for the seed above.
+    const RFC4226: [&str; 10] = [
+        "755224", "287082", "359152", "969429", "338314", "254676", "287922", "162583", "399871",
+        "520489",
+    ];
+
+    /// One advance moves the counter by exactly one, and the code it then
+    /// produces is the published RFC value for the *new* counter — not merely
+    /// "different from before".
+    #[test]
+    fn advance_counter_steps_through_the_rfc4226_table() {
+        let mut acct = hotp_account(0);
+        for (counter, want) in RFC4226.iter().enumerate() {
+            assert_eq!(acct.counter, counter as u64);
+            assert_eq!(
+                &acct.current_code(0).unwrap(),
+                want,
+                "RFC 4226 counter {counter}"
+            );
+            if counter + 1 < RFC4226.len() {
+                assert!(acct.advance_counter());
+            }
+        }
+    }
+
+    #[test]
+    fn advance_counter_refuses_totp_and_saturation() {
+        // Spelled out rather than `..hotp_account(0)`: `StoredAccount` is a
+        // `Drop` type, so struct-update syntax cannot partial-move out of it.
+        let mut totp = hotp_account(0);
+        totp.kind = StoredKind::Totp;
+        assert!(
+            !totp.advance_counter(),
+            "a TOTP account has no counter to spend"
+        );
+        assert_eq!(totp.counter, 0);
+
+        let mut maxed = hotp_account(u64::MAX);
+        assert!(!maxed.advance_counter(), "must not wrap the counter");
+        assert_eq!(maxed.counter, u64::MAX);
+    }
+
+    /// The advanced counter has to be inside the sealed payload, not just in
+    /// memory — otherwise a re-unlock rewinds to a code already spent.
+    #[test]
+    fn advanced_counter_survives_reseal_and_unlock() {
+        let mut data = VaultData {
+            accounts: vec![hotp_account(3)],
+            policy: FactorPolicy::default(),
+            voiceprint: None,
+            voice_pin_hash: None,
+        };
+        let (mut file, dek) = VaultFile::create(b"123456", &data).unwrap();
+        assert!(data.accounts[0].advance_counter());
+        file.reseal(&dek, &data).unwrap();
+
+        let json = serde_json::to_string(&file).unwrap();
+        let back: VaultFile = serde_json::from_str(&json).unwrap();
+        let (loaded, _) = back.unlock(b"123456").unwrap();
+        assert_eq!(loaded.accounts[0].counter, 4);
+        assert_eq!(loaded.accounts[0].current_code(0).unwrap(), RFC4226[4]);
+    }
+
+    /// Advancing must not change the persisted shape: `tests/cross_compat.rs`
+    /// and the Dart mirror both open each other's vaults field by field.
+    #[test]
+    fn advancing_does_not_change_the_stored_field_set() {
+        let mut acct = hotp_account(3);
+        acct.advance_counter();
+        let json: serde_json::Value = serde_json::to_value(&acct).unwrap();
+        let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "algorithm",
+                "counter",
+                "digits",
+                "id",
+                "issuer",
+                "kind",
+                "label",
+                "period",
+                "secret"
+            ]
+        );
+        assert_eq!(json["counter"], 4);
+        assert_eq!(json["kind"], "Hotp");
     }
 
     #[test]
