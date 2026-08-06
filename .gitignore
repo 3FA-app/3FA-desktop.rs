@@ -24,3 +24,7 @@ node_modules
 
 # Local build/run logs
 /.artifacts
+tmp
+temp
+tmp/worktrees
+temp/worktrees
