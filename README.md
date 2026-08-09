@@ -106,6 +106,12 @@ scripts/release/ Package binaries into per-OS zips + publish to S3
 
 ## Build, test, run
 
+Release client configuration is stored as SOPS ciphertext and passed to Cargo
+only after an exact public-value allowlist check. See
+[`docs/env-secrets.md`](docs/env-secrets.md); use `nix develop`, `just verify`,
+`just run dev`, or `just build-release prod`. Never compile backend secrets or
+collector private keys into the desktop binary.
+
 ```bash
 cargo test --workspace                 # or: cargo test
 cargo test --no-default-features       # headless core only (CI, no display)
