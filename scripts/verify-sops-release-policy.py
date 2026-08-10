@@ -36,7 +36,7 @@ def parse_recipients(path: Path) -> dict[str, set[str]]:
         if in_age:
             item_match = LIST_ITEM.match(raw_line)
             if item_match:
-                value = item_match.group("value")
+                value = item_match.group("value").strip().strip("\"'")
                 if value.startswith("age1"):
                     recipients[current].add(value)
                     continue
