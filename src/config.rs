@@ -31,6 +31,14 @@ pub struct SyncConfig {
 /// public identifiers, not secrets. `config.json` overrides them when non-empty.
 const DEFAULT_SUPABASE_URL: Option<&str> = option_env!("THREEFA_SUPABASE_URL");
 const DEFAULT_SUPABASE_ANON_KEY: Option<&str> = option_env!("THREEFA_SUPABASE_ANON_KEY");
+const DEFAULT_SYNC_SERVER_URL: Option<&str> = option_env!("THREEFA_SYNC_SERVER_URL");
+
+/// Public build-time telemetry routing. The collector private key is never a
+/// client setting and must not be added here.
+pub const TELEMETRY_COLLECTOR_PUBLIC_KEY: Option<&str> =
+    option_env!("THREEFA_TELEMETRY_COLLECTOR_PUBLIC_KEY");
+pub const TELEMETRY_KEY_ID: Option<&str> = option_env!("THREEFA_TELEMETRY_KEY_ID");
+pub const TELEMETRY_CHANNEL: Option<&str> = option_env!("THREEFA_TELEMETRY_CHANNEL");
 
 impl SyncConfig {
     /// Load config from `path`, or return defaults if it is missing/unreadable.
@@ -71,6 +79,15 @@ impl SyncConfig {
             return Some(&self.supabase_anon_key);
         }
         DEFAULT_SUPABASE_ANON_KEY.filter(|s| !s.is_empty())
+    }
+
+    /// Effective sync server: per-install config, then the public release
+    /// default supplied by the reviewed desktop build environment.
+    pub fn server_url(&self) -> Option<&str> {
+        if !self.server_url.is_empty() {
+            return Some(&self.server_url);
+        }
+        DEFAULT_SYNC_SERVER_URL.filter(|value| !value.is_empty())
     }
 }
 
@@ -147,5 +164,18 @@ mod tests {
     fn new_config_fields_default_to_empty() {
         let c = SyncConfig::default();
         assert!(c.supabase_url.is_empty() && c.supabase_anon_key.is_empty());
+    }
+
+    #[test]
+    fn server_accessor_prefers_per_install_config() {
+        let configured = SyncConfig {
+            server_url: "https://sync.example.test".into(),
+            ..Default::default()
+        };
+        assert_eq!(configured.server_url(), Some("https://sync.example.test"));
+        assert_eq!(
+            SyncConfig::default().server_url(),
+            super::DEFAULT_SYNC_SERVER_URL.filter(|value| !value.is_empty())
+        );
     }
 }

@@ -135,7 +135,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.set_screen(if setup { "setup".into() } else { "lock".into() });
     {
         let s = state.borrow();
-        app.set_sync_server(s.sync_cfg.server_url.clone().into());
+        app.set_sync_server(s.sync_cfg.server_url().unwrap_or_default().into());
         app.set_sync_username(s.sync_cfg.username.clone().into());
     }
     // Native factors are stubbed for now (see auth::biometric); hide their
@@ -579,7 +579,10 @@ fn pin_unlock(
     // (typical on a PIN unlock — identity was saved at sign-in).
     let (cfg_server, cfg_user) = {
         let s = state.borrow();
-        (s.sync_cfg.server_url.clone(), s.sync_cfg.username.clone())
+        (
+            s.sync_cfg.server_url().unwrap_or_default().to_string(),
+            s.sync_cfg.username.clone(),
+        )
     };
     let server = if server.is_empty() {
         cfg_server

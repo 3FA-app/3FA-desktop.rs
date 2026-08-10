@@ -28,3 +28,28 @@ tmp
 temp
 tmp/worktrees
 temp/worktrees
+
+# Python/Nix tooling output
+__pycache__/
+*.py[cod]
+.direnv/
+/result
+/result-*
+
+# BEGIN ores-sops dotenv policy
+# Plaintext dotenv is local-only at every depth, including common suffix variants.
+*.env
+*/*.env
+*/**/*.env
+.env.*
+*.env.*
+!.env.example
+
+# Decrypted material is never tracked.
+/env/dec/
+
+# Only the two approved ciphertext files are trackable.
+/env/enc/*
+!/env/enc/dev.env.enc
+!/env/enc/prod.env.enc
+# END ores-sops dotenv policy
