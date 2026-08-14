@@ -1,0 +1,16 @@
+# Bootstrap policy. Dev and prod have separate exact path rules.
+# The same local recipient is used only to make the initial pilot usable.
+# Before production use, replace the prod recipient set with a distinct
+# protected production identity/KMS policy and run sops updatekeys.
+#
+# Every rule below lists each recipient explicitly. Keep at least two so a lost
+# identity is a rekey rather than permanent loss; add more with
+#   ores-sops init --recipient age1... (at scaffold time)
+#   sops updatekeys env/enc/<name>.env.enc (afterwards)
+creation_rules:
+  - path_regex: ^env/enc/dev\.env\.enc$
+    age:
+      - age1s8lcnaxn9g77s6j4g7p24w6sgvllpue0lzrsvp3xk02k2gwjj5ssnkp39q
+  - path_regex: ^env/enc/prod\.env\.enc$
+    age:
+      - age1s8lcnaxn9g77s6j4g7p24w6sgvllpue0lzrsvp3xk02k2gwjj5ssnkp39q
