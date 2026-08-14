@@ -29,10 +29,14 @@ lock:
 verify:
     @ores-sops verify
 
+verify-release-policy name="prod":
+    @python3 scripts/verify-sops-release-policy.py .sops.yaml {{ name }}
+
 # Desktop client values are compiled with option_env!, so the launcher accepts
 # only the reviewed public allowlist before invoking Cargo.
 run name="dev":
     sops exec-file --input-type dotenv --output-type json env/enc/{{ name }}.env.enc 'python3 scripts/build-with-public-env.py {} -- cargo run'
 
 build-release name="prod":
+    python3 scripts/verify-sops-release-policy.py .sops.yaml {{ name }}
     sops exec-file --input-type dotenv --output-type json env/enc/{{ name }}.env.enc 'python3 scripts/build-with-public-env.py {} --require-configured -- cargo build --release'
