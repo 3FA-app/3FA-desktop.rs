@@ -156,7 +156,12 @@ impl VaultLifecycle {
                 if self.phase != Phase::Setup {
                     return rejected;
                 }
-                self.generation = self.generation.saturating_add(1);
+                let Some(next_generation) = self.generation.checked_add(1) else {
+                    // Fail closed instead of ever reusing a generation-stamped
+                    // token after the finite counter is exhausted.
+                    return rejected;
+                };
+                self.generation = next_generation;
                 let token = OperationToken {
                     generation: self.generation,
                     operation: Operation::Create,
@@ -172,7 +177,10 @@ impl VaultLifecycle {
                 if self.phase != Phase::Locked {
                     return rejected;
                 }
-                self.generation = self.generation.saturating_add(1);
+                let Some(next_generation) = self.generation.checked_add(1) else {
+                    return rejected;
+                };
+                self.generation = next_generation;
                 let token = OperationToken {
                     generation: self.generation,
                     operation: Operation::Unlock,
@@ -297,5 +305,22 @@ mod tests {
         assert!(!state.apply(Signal::BeginUnlock).accepted);
         assert_eq!(state, initial);
         assert_eq!(state.active_operation(), None);
+    }
+
+    #[test]
+    fn exhausted_generation_never_reuses_an_operation_token() {
+        let mut state = VaultLifecycle {
+            phase: Phase::Locked,
+            generation: u64::MAX - 1,
+            active: None,
+        };
+        let final_token = state.begin_unlock().unwrap();
+        assert_eq!(final_token.generation(), u64::MAX);
+
+        assert!(state.lock());
+        assert_eq!(state.generation(), u64::MAX);
+        assert_eq!(state.begin_unlock(), None);
+        assert!(!state.complete(final_token, true));
+        assert_eq!(state.phase(), Phase::Locked);
     }
 }

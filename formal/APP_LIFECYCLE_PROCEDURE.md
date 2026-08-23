@@ -16,7 +16,8 @@ cargo test --no-default-features
 The checked properties are:
 
 1. Create and unlock are explicit operation phases with unique generation
-   tokens.
+   tokens. The finite model also checks counter exhaustion: production rejects
+   new operations at `u64::MAX` instead of reusing a token.
 2. Lock invalidates every outstanding operation.
 3. A stale completion cannot move a non-unlocked state to `Unlocked`.
 4. Dispose is absorbing.

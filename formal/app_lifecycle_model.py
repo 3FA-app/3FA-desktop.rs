@@ -35,6 +35,7 @@ class Signal(Enum):
 
 
 Token = tuple[int, Operation]
+MAX_GENERATION = 3  # Finite abstraction of Rust's u64::MAX exhaustion guard.
 
 
 @dataclass(frozen=True)
@@ -50,12 +51,12 @@ def step(state: State, signal: Signal, token: Token | None = None) -> tuple[Stat
     if signal is Signal.INITIALIZED_VAULT:
         return (State(Phase.LOCKED, state.generation), True, None) if state.phase is Phase.LOADING else (state, False, None)
     if signal is Signal.BEGIN_CREATE:
-        if state.phase is not Phase.SETUP:
+        if state.phase is not Phase.SETUP or state.generation == MAX_GENERATION:
             return state, False, None
         issued = (state.generation + 1, Operation.CREATE)
         return State(Phase.CREATING, state.generation + 1, issued), True, issued
     if signal is Signal.BEGIN_UNLOCK:
-        if state.phase is not Phase.LOCKED:
+        if state.phase is not Phase.LOCKED or state.generation == MAX_GENERATION:
             return state, False, None
         issued = (state.generation + 1, Operation.UNLOCK)
         return State(Phase.UNLOCKING, state.generation + 1, issued), True, issued
@@ -80,16 +81,16 @@ def step(state: State, signal: Signal, token: Token | None = None) -> tuple[Stat
             Phase.UNLOCKING: Phase.LOCKED,
             Phase.UNLOCKED: Phase.LOCKED,
         }[state.phase]
-        return State(target, state.generation + 1), True, None
+        return State(target, min(state.generation + 1, MAX_GENERATION)), True, None
     if signal is Signal.DISPOSE:
         if state.phase is Phase.DISPOSED:
             return state, False, None
-        return State(Phase.DISPOSED, state.generation + 1), True, None
+        return State(Phase.DISPOSED, min(state.generation + 1, MAX_GENERATION)), True, None
     raise AssertionError(f"unmodeled signal: {signal}")
 
 
 def invariant(previous: State, current: State, signal: Signal, token: Token | None, accepted: bool) -> None:
-    assert current.generation >= previous.generation >= 0
+    assert MAX_GENERATION >= current.generation >= previous.generation >= 0
     assert (current.active is not None) == (current.phase in (Phase.CREATING, Phase.UNLOCKING))
     if current.active is not None:
         assert current.active[0] == current.generation

@@ -9,7 +9,7 @@ timeout_seconds = 30
 
 [[invariants]]
 id = "operation-phase-correspondence"
-description = "An active create or unlock token exists exactly in its operation phase."
+description = "An active create or unlock token exists exactly in its operation phase; exhausted counters reject new operations."
 
 [[invariants]]
 id = "lock-invalidates-operations"
