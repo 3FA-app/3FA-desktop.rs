@@ -47,6 +47,11 @@ contents, or encryption keys.
   Argon2id key from your passcode. Keys are zeroized on lock. (The extra
   Secure-Enclave / TPM wrap of the DEK is designed for but not implemented — it
   depends on the biometric backend below.)
+- **Secure Bluetooth substrate** — ephemeral X25519, transcript-bound
+  HKDF-SHA256, explicit six-digit SAS confirmation, and directional
+  ChaCha20-Poly1305 frames are implemented and cross-tested with Dart. Platform
+  Bluetooth adapters and permissions remain disabled until they satisfy the
+  [adapter acceptance gate](docs/SECURE_BLUETOOTH_PROTOCOL.md).
 - **Multi-factor policy engine** — counts *distinct* factor kinds (passcode,
   biometric, platform passkey, voice) against a per-vault [`FactorPolicy`].
   **Today only the passcode factor is actually wired into the app**: the vault
