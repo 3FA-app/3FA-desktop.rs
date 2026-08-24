@@ -6,9 +6,12 @@ This repository is the **live Rust desktop implementation** for 3FA.
 
 - Rust: [`3FA-app/3FA-desktop.rs`](https://github.com/3FA-app/3FA-desktop.rs) — **live**; this repository.
 - Flutter, current: [`ORESoftware/3fa-client-ui.dart`](https://github.com/ORESoftware/3fa-client-ui.dart) — the **current cross-owner Flutter product implementation** with native Linux, macOS, and Windows runner projects.
-- Flutter, canonical target: `3FA-app/3fa-flutter` — **planned organization-local target** and not yet verified as a published repository.
+- Flutter, organization mirror: [`3FA-app/3fa-flutter`](https://github.com/3FA-app/3fa-flutter) — **live private mirror**, seeded from the current cross-owner history on 2026-08-24; it is not yet the release authority.
 
-Until the organization-local target is published and its history or replacement path is explicitly reconciled, desktop-facing Flutter work belongs in `ORESoftware/3fa-client-ui.dart`. The target name is an allocation, not proof that a remote exists.
+Until migration ownership and the release path are explicitly reconciled,
+desktop-facing Flutter work belongs in `ORESoftware/3fa-client-ui.dart` and is
+mirrored to the organization repository. A live mirror is not proof of native
+platform support, packaging, signing, or release readiness.
 
 ## Rust toolkit
 

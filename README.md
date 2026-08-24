@@ -25,9 +25,11 @@ privilege-boundary, test, packaging, and HTTPS-first deep-link contract.
 
 The current Flutter companion is
 [`ORESoftware/3fa-client-ui.dart`](https://github.com/ORESoftware/3fa-client-ui.dart).
-The canonical organization-owned migration target is `3FA-app/3fa-flutter`; it
-must not be described as published until its remote, history/functionality,
-native builds, tests, packaging, signing, and reciprocal links are verified.
+The private organization mirror is
+[`3FA-app/3fa-flutter`](https://github.com/3FA-app/3fa-flutter), seeded from the
+current companion history on 2026-08-24. Its existence does not establish
+release authority or platform support; native builds, packaging, signing,
+migration ownership, and reciprocal release links remain gated separately.
 
 Rust and Flutter are both first-class product implementations. Every
 desktop-facing feature must inspect both repositories and normally update both.
