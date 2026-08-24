@@ -109,7 +109,9 @@ OS-specific Bluetooth work is intentionally the next change, after this substrat
 
 - requests Bluetooth permissions only in a build that contains a reachable pairing flow;
 - prefers authenticated LE Secure Connections where the platform permits, while still requiring this protocol;
-- advertises only a random, protocol-scoped service identifier and never puts secrets in names or advertisements;
+- advertises only a dedicated protocol service identifier plus a random
+  per-attempt opaque token, and never puts a stable device identity or secret in
+  names or advertisements;
 - applies strict connection, reassembly, byte, attempt, and timeout limits before parsing;
 - never exposes application plaintext to GATT/L2CAP callbacks or persists session material;
 - renders a deliberate two-device SAS confirmation step with cancel and timeout behavior;
