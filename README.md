@@ -25,9 +25,11 @@ privilege-boundary, test, packaging, and HTTPS-first deep-link contract.
 
 The current Flutter companion is
 [`ORESoftware/3fa-client-ui.dart`](https://github.com/ORESoftware/3fa-client-ui.dart).
-The canonical organization-owned migration target is `3FA-app/3fa-flutter`; it
-must not be described as published until its remote, history/functionality,
-native builds, tests, packaging, signing, and reciprocal links are verified.
+The private organization mirror is
+[`3FA-app/3fa-flutter`](https://github.com/3FA-app/3fa-flutter), seeded from the
+current companion history on 2026-08-24. Its existence does not establish
+release authority or platform support; native builds, packaging, signing,
+migration ownership, and reciprocal release links remain gated separately.
 
 Rust and Flutter are both first-class product implementations. Every
 desktop-facing feature must inspect both repositories and normally update both.
@@ -47,6 +49,11 @@ contents, or encryption keys.
   Argon2id key from your passcode. Keys are zeroized on lock. (The extra
   Secure-Enclave / TPM wrap of the DEK is designed for but not implemented — it
   depends on the biometric backend below.)
+- **Secure Bluetooth substrate** — ephemeral X25519, transcript-bound
+  HKDF-SHA256, explicit six-digit SAS confirmation, and directional
+  ChaCha20-Poly1305 frames are implemented and cross-tested with Dart. Platform
+  Bluetooth adapters and permissions remain disabled until they satisfy the
+  [adapter acceptance gate](docs/SECURE_BLUETOOTH_PROTOCOL.md).
 - **Multi-factor policy engine** — counts *distinct* factor kinds (passcode,
   biometric, platform passkey, voice) against a per-vault [`FactorPolicy`].
   **Today only the passcode factor is actually wired into the app**: the vault

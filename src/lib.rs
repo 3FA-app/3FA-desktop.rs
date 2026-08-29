@@ -13,6 +13,7 @@ pub mod otp;
 pub mod pin_session;
 pub mod protocol;
 pub mod qr;
+pub mod secure_bluetooth;
 pub mod session;
 pub mod sync;
 pub mod vault;

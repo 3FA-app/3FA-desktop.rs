@@ -35,6 +35,7 @@ verify-release-policy name="prod":
 formal:
     python3 formal/session_model.py
     python3 formal/app_lifecycle_model.py
+    python3 formal/secure_bluetooth_model.py
 
 # Desktop client values are compiled with option_env!, so the launcher accepts
 # only the reviewed public allowlist before invoking Cargo.
