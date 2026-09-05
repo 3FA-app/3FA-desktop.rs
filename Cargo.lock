@@ -4124,6 +4124,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-local-authentication"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48e0b8b339e0d9d2ed4416b7f93f9d4daadff7d4dd797f89867cde11aeac607"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-metal"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6057,12 +6067,16 @@ dependencies = [
  "arboard",
  "argon2",
  "base32",
+ "block2 0.6.2",
  "chacha20poly1305",
  "hex",
  "hmac 0.13.0",
  "image",
  "keyring",
  "nokhwa",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-local-authentication",
  "qrcode",
  "rand 0.10.2",
  "rand_core 0.6.4",

@@ -79,6 +79,22 @@ nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["blocking", "json", "rustls-tls"] }
 keyring = { version = "4", optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = { version = "0.6", default-features = false, features = ["std", "alloc"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSError",
+    "NSString",
+] }
+objc2-local-authentication = { version = "0.3", default-features = false, features = [
+    "std",
+    "LABase",
+    "LABiometryType",
+    "LAContext",
+    "LAError",
+] }
+
 [build-dependencies]
 slint-build = "1.8"
 
