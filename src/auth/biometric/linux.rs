@@ -5,7 +5,9 @@
 //! This is the weakest of the three platform backends (see plan); native wiring
 //! sits behind the `native` seam.
 
-use crate::auth::{AuthFactor, Challenge, FactorError, FactorKind, FactorProof};
+use crate::auth::{
+    AuthFactor, BiometryKind, Challenge, FactorError, FactorKind, FactorProof,
+};
 
 pub struct BiometricFactor {
     reason: String,
@@ -15,6 +17,14 @@ impl BiometricFactor {
     pub fn new(reason: impl Into<String>) -> Self {
         Self {
             reason: reason.into(),
+        }
+    }
+
+    pub fn kind_available() -> BiometryKind {
+        if native::has_enrolled_print() {
+            BiometryKind::Fingerprint
+        } else {
+            BiometryKind::Unavailable
         }
     }
 }

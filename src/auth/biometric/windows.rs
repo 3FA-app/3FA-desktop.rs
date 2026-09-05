@@ -5,7 +5,9 @@
 //! Native wiring (WinRT `windows` crate) sits behind the `native` seam; until
 //! linked, the factor reports as unavailable.
 
-use crate::auth::{AuthFactor, Challenge, FactorError, FactorKind, FactorProof};
+use crate::auth::{
+    AuthFactor, BiometryKind, Challenge, FactorError, FactorKind, FactorProof,
+};
 
 pub struct BiometricFactor {
     reason: String,
@@ -15,6 +17,14 @@ impl BiometricFactor {
     pub fn new(reason: impl Into<String>) -> Self {
         Self {
             reason: reason.into(),
+        }
+    }
+
+    pub fn kind_available() -> BiometryKind {
+        if native::available() {
+            BiometryKind::WindowsHello
+        } else {
+            BiometryKind::Unavailable
         }
     }
 }

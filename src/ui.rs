@@ -16,7 +16,10 @@ use zeroize::{Zeroize, Zeroizing};
 const CLIPBOARD_CLEAR_AFTER: Duration = Duration::from_secs(20);
 
 use threefa_core::app_state::{Phase as VaultPhase, VaultLifecycle};
+use threefa_core::auth::biometric::BiometricFactor;
+use threefa_core::auth::biometric_wrap;
 use threefa_core::auth::{FactorProof, PolicyEngine};
+use threefa_core::crypto;
 use threefa_core::config::{config_path, SyncConfig};
 use threefa_core::crypto::SecretKey;
 use threefa_core::otp::uri::OtpAccount;
@@ -160,9 +163,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.set_sync_server(s.sync_cfg.server_url().unwrap_or_default().into());
         app.set_sync_username(s.sync_cfg.username.clone().into());
     }
-    // Native factors are stubbed for now (see auth::biometric); hide their
-    // buttons until a real backend reports availability.
-    app.set_biometric_available(false);
+    let biometry = BiometricFactor::kind_available();
+    app.set_biometric_available(biometry.is_available());
+    app.set_biometric_label(biometry.lock_screen_label().into());
     app.set_passkey_available(false);
     app.set_voice_available(false);
     // The "Scan camera" button only appears in builds that include the camera
@@ -348,13 +351,12 @@ fn wire_callbacks(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         });
     }
 
-    // Native factor buttons — wired but inert until backends report available.
     {
+        let state = state.clone();
         let weak = weak.clone();
         app.on_use_biometric(move || {
-            if let Some(app) = weak.upgrade() {
-                app.set_status("Biometric backend not yet enabled".into());
-            }
+            let Some(app) = weak.upgrade() else { return };
+            handle_biometric_unlock(&app, &state);
         });
     }
     {
@@ -842,6 +844,7 @@ fn handle_passcode_submit(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 s.dek = Some(dek);
                 s.session.unlock(Instant::now());
                 s.assert_lifecycle_invariant();
+                enroll_biometric_wrap(&s.vault_path, &dek);
                 drop(s);
                 app.set_screen("vault".into());
                 app.set_status("Vault created".into());
@@ -873,9 +876,10 @@ fn handle_passcode_submit(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 return;
             }
             s.data = Some(data);
-            s.dek = Some(dek);
+            s.dek = Some(dek.clone());
             s.session.unlock(Instant::now());
             s.assert_lifecycle_invariant();
+            enroll_biometric_wrap(&s.vault_path, &dek);
             drop(s);
             app.set_screen("vault".into());
             app.set_status("".into());
@@ -970,6 +974,110 @@ fn spawn_tick(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 /// factor; this is the seam where a biometric/passkey/voice proof gets added.
 fn collect_available_factor_proofs() -> Vec<FactorProof> {
     Vec::new()
+}
+
+const BIOMETRIC_KEYRING_SERVICE: &str = "3fa-desktop";
+const BIOMETRIC_KEYRING_ACCOUNT: &str = "biometric-dek-wrap";
+
+fn handle_biometric_unlock(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
+    let mut factor = BiometricFactor::new("Unlock 3FA");
+    match factor.verify(&threefa_core::auth::Challenge::default()) {
+        Err(threefa_core::auth::FactorError::Unavailable) => {
+            app.set_status("Face ID / Touch ID is not available on this device".into());
+            return;
+        }
+        Err(threefa_core::auth::FactorError::Rejected) => {
+            app.set_status("Face ID / Touch ID was not recognized".into());
+            return;
+        }
+        Err(e) => {
+            app.set_status(e.to_string().into());
+            return;
+        }
+        Ok(proof) => {
+            let mut s = state.borrow_mut();
+            let engine = s.policy_engine();
+            if !engine.is_satisfied(threefa_core::auth::Gate::Unlock, &[proof]) {
+                app.set_status("Unlock also requires the passcode".into());
+                return;
+            }
+            let Some(operation) = s.lifecycle.begin_unlock() else {
+                app.set_status("Vault unlock is not available in the current state".into());
+                return;
+            };
+            let Some(file) = s.file.clone() else {
+                s.lifecycle.complete(operation, false);
+                app.set_status("No vault found".into());
+                return;
+            };
+            let wrap_key = match load_or_create_wrap_key() {
+                Ok(key) => key,
+                Err(_) => {
+                    s.lifecycle.complete(operation, false);
+                    app.set_status("Unlock once with the passcode to enable Face ID".into());
+                    return;
+                }
+            };
+            let dek = match biometric_wrap::unlock_dek(&s.vault_path, &wrap_key) {
+                Ok(dek) => dek,
+                Err(_) => {
+                    s.lifecycle.complete(operation, false);
+                    app.set_status("Unlock once with the passcode to enable Face ID".into());
+                    return;
+                }
+            };
+            match file.unlock_with_dek(&dek) {
+                Ok(data) => {
+                    if !s.lifecycle.complete(operation, true) {
+                        app.set_status("Vault unlock was cancelled by a lock".into());
+                        return;
+                    }
+                    s.data = Some(data);
+                    s.dek = Some(dek);
+                    s.session.unlock(Instant::now());
+                    s.assert_lifecycle_invariant();
+                    drop(s);
+                    app.set_screen("vault".into());
+                    app.set_status("".into());
+                    refresh_vault(app, state);
+                }
+                Err(_) => {
+                    s.lifecycle.complete(operation, false);
+                    app.set_status("Face ID unlock failed".into());
+                }
+            }
+        }
+    }
+}
+
+fn enroll_biometric_wrap(vault_path: &std::path::Path, dek: &crypto::SecretKey) {
+    let Ok(wrap_key) = load_or_create_wrap_key() else {
+        return;
+    };
+    let _ = biometric_wrap::enroll(vault_path, &wrap_key, dek);
+}
+
+fn load_or_create_wrap_key() -> Result<crypto::SecretKey, String> {
+    let entry = keyring::Entry::new(BIOMETRIC_KEYRING_SERVICE, BIOMETRIC_KEYRING_ACCOUNT)
+        .map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(stored) => {
+            let bytes = hex::decode(stored.trim()).map_err(|_| "corrupt biometric wrap key".to_owned())?;
+            if bytes.len() != crypto::KEY_LEN {
+                return Err("corrupt biometric wrap key".into());
+            }
+            let mut key = [0u8; crypto::KEY_LEN];
+            key.copy_from_slice(&bytes);
+            Ok(zeroize::Zeroizing::new(key))
+        }
+        Err(_) => {
+            let key = crypto::random_key();
+            entry
+                .set_password(&hex::encode(&*key))
+                .map_err(|e| e.to_string())?;
+            Ok(key)
+        }
+    }
 }
 
 /// Enroll an account from a decoded/typed `otpauth://` URI: parse it, append it

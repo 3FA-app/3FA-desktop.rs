@@ -322,6 +322,17 @@ impl VaultFile {
         Ok((data, dek))
     }
 
+    /// Open the payload with an already-unwrapped DEK (Face ID / Touch ID path).
+    ///
+    /// The wrap that produced `dek` lives outside this type so a biometric
+    /// sidecar cannot be confused with the passcode-wrapped DEK.
+    pub fn unlock_with_dek(&self, dek: &crypto::SecretKey) -> Result<VaultData, VaultError> {
+        if self.format_version != Self::CURRENT_FORMAT {
+            return Err(VaultError::UnsupportedVersion(self.format_version));
+        }
+        self.open_payload(dek.as_ref())
+    }
+
     /// Re-seal updated data under an already-unwrapped DEK (no KDF cost).
     pub fn reseal(&mut self, dek: &[u8; KEY_LEN], data: &VaultData) -> Result<(), VaultError> {
         self.payload = Self::seal_payload(dek, data)?.into();
@@ -383,6 +394,15 @@ mod tests {
         let back: VaultFile = serde_json::from_str(&json).unwrap();
         let (loaded, _) = back.unlock(b"123456").unwrap();
         assert_eq!(loaded.accounts.len(), 1);
+    }
+
+    #[test]
+    fn unlock_with_dek_matches_passcode_unlock() {
+        let (file, dek) = VaultFile::create(b"123456", &sample_data()).unwrap();
+        let via_passcode = file.unlock(b"123456").unwrap().0;
+        let via_dek = file.unlock_with_dek(&dek).unwrap();
+        assert_eq!(via_passcode.accounts.len(), via_dek.accounts.len());
+        assert_eq!(via_passcode.policy, via_dek.policy);
     }
 
     #[test]

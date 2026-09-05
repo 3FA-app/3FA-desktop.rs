@@ -6,6 +6,7 @@
 //! factors exist — it only counts **distinct kinds**, so adding a new factor
 //! never requires touching the policy logic.
 
+pub mod biometric_wrap;
 pub mod passcode;
 pub mod passkey;
 pub mod voice;
@@ -22,6 +23,34 @@ pub mod biometric;
 
 use crate::vault::FactorPolicy;
 use std::collections::BTreeSet;
+
+/// Which platform biometric the lock screen should offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BiometryKind {
+    Unavailable,
+    TouchId,
+    FaceId,
+    OpticId,
+    WindowsHello,
+    Fingerprint,
+}
+
+impl BiometryKind {
+    pub fn lock_screen_label(self) -> &'static str {
+        match self {
+            Self::Unavailable => "Biometric",
+            Self::TouchId => "Touch ID",
+            Self::FaceId => "Face ID",
+            Self::OpticId => "Optic ID",
+            Self::WindowsHello => "Windows Hello",
+            Self::Fingerprint => "Fingerprint",
+        }
+    }
+
+    pub fn is_available(self) -> bool {
+        !matches!(self, Self::Unavailable)
+    }
+}
 
 /// The category of an authentication factor. The policy engine counts *distinct*
 /// kinds, so presenting the same kind twice never counts as two factors.
@@ -171,5 +200,15 @@ mod tests {
             proof(FactorKind::Voice),
         ];
         assert!(eng.is_satisfied(Gate::Unlock, &three));
+    }
+
+    #[test]
+    fn default_unlock_accepts_biometric_alone() {
+        let eng = PolicyEngine::new(FactorPolicy {
+            unlock_factors: 1,
+            extend_factors: 1,
+        });
+        assert!(eng.is_satisfied(Gate::Unlock, &[proof(FactorKind::Biometric)]));
+        assert_eq!(BiometryKind::FaceId.lock_screen_label(), "Face ID");
     }
 }
