@@ -37,7 +37,7 @@ threefa-interfaces = { path = "vendor/threefa-interfaces" }
 argon2 = "0.5"
 chacha20poly1305 = "0.11"
 hkdf = "0.13"
-x25519-dalek = { version = "2.0.1", features = ["getrandom", "static_secrets"] }
+x25519-dalek = { version = "3.0.0", features = ["getrandom", "static_secrets"] }
 # The OTP digest stack moves as one `digest` 0.11 family: sha1 0.11 and sha2
 # 0.11 are built on it, and hmac 0.13 is the matching MAC. Mixing a 0.10-family
 # hash into hmac 0.13 does not compile — the trait bounds come from two
