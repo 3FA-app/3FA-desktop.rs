@@ -59,3 +59,6 @@ __pycache__/
 **/*.env
 **/**/*.env
 env/dec
+
+# Machine-local agent instruction symlink (absolute path; never committed)
+.ores/
