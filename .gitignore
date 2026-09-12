@@ -59,3 +59,7 @@ __pycache__/
 **/*.env
 **/**/*.env
 env/dec
+
+# Sanctioned scratch locations - AGENTS.md requires both, trailing-slash form
+tmp/
+temp/
