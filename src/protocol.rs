@@ -387,4 +387,54 @@ mod tests {
         // A fresh account has never pushed: the empty vector must validate.
         assert!(version_vector_is_well_formed(&Vec::new()));
     }
+
+    #[test]
+    fn kdf_cost_limits_reject_dangerous_parameters() {
+        let valid = KdfParams::default();
+        assert!(valid.is_sane());
+
+        for (memory, passes, lanes) in [
+            (0, 3, 1),
+            (8 * 1024 - 1, 3, 1),
+            (1024 * 1024 + 1, 3, 1),
+            (256 * 1024, 0, 1),
+            (256 * 1024, 11, 1),
+            (256 * 1024, 3, 0),
+            (256 * 1024, 3, 5),
+        ] {
+            let params = KdfParams {
+                mem_kib: memory,
+                iterations: passes,
+                parallelism: lanes,
+            };
+            assert!(!params.is_sane(), "unexpectedly accepted {params:?}");
+            let mut blob = sample_blob();
+            blob.kdf_params = params;
+            assert!(!blob.is_well_formed());
+        }
+    }
+
+    #[test]
+    fn ciphertext_nonce_and_identifier_admission_boundaries() {
+        let mut blob = sample_blob();
+        blob.ciphertext = vec![7; MAX_CIPHERTEXT_LEN];
+        assert!(blob.is_well_formed());
+        blob.ciphertext.push(7);
+        assert!(!blob.is_well_formed());
+        blob.ciphertext.clear();
+        assert!(!blob.is_well_formed());
+
+        let mut blob = sample_blob();
+        blob.nonce = vec![0; NONCE_LEN - 1];
+        assert!(!blob.is_well_formed());
+        blob.nonce = vec![0; NONCE_LEN + 1];
+        assert!(!blob.is_well_formed());
+
+        for id in ["", "a b", "a/b", "a\nb", "a\u{202e}evil", "../device"] {
+            assert!(!device_id_is_valid(id), "unexpected device id: {id:?}");
+        }
+        assert!(!device_id_is_valid(&"a".repeat(MAX_DEVICE_ID_LEN + 1)));
+        assert!(device_id_is_valid("device:primary_01.test"));
+    }
+
 }
